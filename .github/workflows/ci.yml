@@ -1,0 +1,44 @@
+name: CI
+
+on: [push, pull_request]
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Check format
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - run: rustup component add rustfmt
+    - run: cargo fmt --all --check
+
+  cargo-deny:
+    name: Deny
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: EmbarkStudios/cargo-deny-action@v2
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        toolchain:
+          - stable
+          - beta
+          - nightly
+    steps:
+      - uses: actions/checkout@v6
+
+      - run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
+
+      - run: cargo build --verbose
+
+      - name: Run tests with no default features
+        run: cargo test --no-default-features --verbose
+
+      - name: Run tests with default configuration
+        run: cargo test --verbose
