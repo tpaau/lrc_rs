@@ -228,3 +228,130 @@ fn serialize() {
         assert_eq!(parsed.serialize(), parsed_twice);
     }
 }
+
+#[test]
+fn line_tag_is_timestamp_order_valid() {
+    assert!(LineTag::default().is_timestamp_order_valid());
+    assert!(
+        LineTag {
+            timestamp: Duration::from_secs(3),
+            segments: vec![SegmentTag {
+                timestamp: Duration::from_secs(3),
+                content: String::new()
+            }]
+        }
+        .is_timestamp_order_valid()
+    );
+    assert!(
+        LineTag {
+            timestamp: Duration::from_secs(3),
+            segments: vec![SegmentTag {
+                timestamp: Duration::from_secs(4),
+                content: String::new()
+            }]
+        }
+        .is_timestamp_order_valid()
+    );
+    assert!(
+        LineTag {
+            timestamp: Duration::from_secs(3),
+            segments: vec![
+                SegmentTag {
+                    timestamp: Duration::from_secs(3),
+                    content: String::new()
+                },
+                SegmentTag {
+                    timestamp: Duration::from_secs(5),
+                    content: String::new()
+                }
+            ]
+        }
+        .is_timestamp_order_valid()
+    );
+    assert!(
+        !LineTag {
+            timestamp: Duration::from_secs(3),
+            segments: vec![
+                SegmentTag {
+                    timestamp: Duration::from_secs(4),
+                    content: String::new()
+                },
+                SegmentTag {
+                    timestamp: Duration::from_secs(4),
+                    content: String::new()
+                }
+            ]
+        }
+        .is_timestamp_order_valid()
+    );
+}
+
+#[test]
+fn synced_lyrics_is_timestamp_order_valid() {
+    assert!(SyncedLyrics::default().is_timestamp_order_valid());
+    assert!(SyncedLyrics::new_with_tags(vec![LineTag::default()]).is_timestamp_order_valid());
+    assert!(
+        SyncedLyrics::new_with_tags(vec![
+            LineTag {
+                timestamp: Duration::from_secs(5),
+                segments: Vec::new()
+            },
+            LineTag {
+                timestamp: Duration::from_secs(6),
+                segments: Vec::new()
+            }
+        ])
+        .is_timestamp_order_valid()
+    );
+    assert!(
+        SyncedLyrics::new_with_tags(vec![
+            LineTag {
+                timestamp: Duration::from_secs(5),
+                segments: vec![
+                    SegmentTag {
+                        timestamp: Duration::from_secs(6),
+                        content: String::new()
+                    },
+                    SegmentTag {
+                        timestamp: Duration::from_secs(7),
+                        content: String::new()
+                    }
+                ]
+            },
+            LineTag {
+                timestamp: Duration::from_secs(8),
+                segments: vec![
+                    SegmentTag {
+                        timestamp: Duration::from_secs(8),
+                        content: String::new()
+                    },
+                    SegmentTag {
+                        timestamp: Duration::from_secs(9),
+                        content: String::new()
+                    }
+                ]
+            },
+            LineTag {
+                timestamp: Duration::from_secs(10),
+                segments: Vec::new()
+            }
+        ])
+        .is_timestamp_order_valid()
+    );
+    assert!(
+        !SyncedLyrics::new_with_tags(vec![
+            LineTag {
+                timestamp: Duration::from_secs(5),
+                segments: vec![SegmentTag {
+                    timestamp: Duration::from_secs(6),
+                    content: String::new()
+                }]
+            },
+            LineTag {
+                timestamp: Duration::from_secs(6),
+                segments: Vec::new()
+            }
+        ])
+        .is_timestamp_order_valid()
+    );
+}

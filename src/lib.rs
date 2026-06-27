@@ -110,6 +110,7 @@ pub trait LyricsAccess: Sized {
     /// Returns lyrics content active at the timestamp or [`None`] if there is no content for the
     /// given timestamp.
     fn lyrics_at(&self, timestamp: Duration) -> Option<&str>;
+    fn is_timestamp_order_valid(&self) -> bool;
 }
 
 /// Segment of lyrics in a [single line](LineTag), associated with a timestamp.
@@ -141,7 +142,7 @@ impl SegmentTag {
 
     /// Checks if the segment is active at the given timestamp.
     pub fn is_active(&self, timestamp: Duration) -> bool {
-        self.timestamp < timestamp
+        self.timestamp >= timestamp
     }
 }
 
@@ -185,6 +186,29 @@ impl LyricsAccess for LineTag {
     fn lyrics_at(&self, timestamp: Duration) -> Option<&str> {
         todo!()
     }
+
+    fn is_timestamp_order_valid(&self) -> bool {
+        if self.segments.is_empty() {
+            true
+        } else {
+            let mut ts;
+            if self.segments[0].timestamp < self.timestamp {
+                return false;
+            } else if self.segments.len() == 1 {
+                return true;
+            } else {
+                ts = &self.segments[0].timestamp;
+            }
+            for segment in &self.segments[1..self.segments.len()] {
+                if segment.timestamp <= *ts {
+                    return false;
+                } else {
+                    ts = &segment.timestamp;
+                }
+            }
+            true
+        }
+    }
 }
 
 impl LineTag {
@@ -195,6 +219,13 @@ impl LineTag {
             segment.timestamp = duration_offset(segment.timestamp, offset_ms)?;
         }
         Ok(())
+    }
+
+    fn last_timestamp(&self) -> &Duration {
+        match self.segments.last() {
+            Some(d) => &d.timestamp,
+            None => &self.timestamp,
+        }
     }
 
     fn serialize(self) -> String {
@@ -269,6 +300,27 @@ impl LyricsAccess for SyncedLyrics {
     fn lyrics_at(&self, timestamp: Duration) -> Option<&str> {
         todo!()
     }
+
+    fn is_timestamp_order_valid(&self) -> bool {
+        if self.lines.len() == 0 {
+            return true;
+        } else {
+            if !self.lines[0].is_timestamp_order_valid() {
+                return false;
+            }
+            let mut ts = self.lines[0].last_timestamp();
+            for line in &self.lines[1..self.lines.len()] {
+                if !line.is_timestamp_order_valid() {
+                    return false;
+                } else if line.timestamp <= *ts {
+                    return false;
+                } else {
+                    ts = line.last_timestamp();
+                }
+            }
+            true
+        }
+    }
 }
 
 impl SyncedLyrics {
@@ -295,6 +347,21 @@ impl SyncedLyrics {
                 warn!("Couldn't parse offset value: {e}");
                 Err(ParseError::from(e))
             }
+        }
+    }
+
+    pub fn new_with_tags(tags: Vec<LineTag>) -> Self {
+        Self {
+            title: None,
+            artist: None,
+            album: None,
+            author: None,
+            lyricist: None,
+            length: None,
+            file_author: None,
+            tool: None,
+            comments: Vec::new(),
+            lines: tags,
         }
     }
 
