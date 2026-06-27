@@ -52,8 +52,8 @@ fn till_a2_tag(i: &str) -> IResult<&str, &str> {
 }
 
 pub(crate) fn timestamp(i: &str) -> IResult<&str, Duration> {
-    let (i, (minutes, _, seconds)) = (float, char(':'), float).parse(i)?;
-    Ok((i, Duration::from_secs_f32(seconds + minutes * 60.0)))
+    let (i, (minutes, _, seconds)) = (nom::character::complete::u64, char(':'), float).parse(i)?;
+    Ok((i, Duration::from_secs_f32(seconds + (minutes * 60) as f32)))
 }
 
 fn unsigned_int(i: &str) -> IResult<&str, u32> {
@@ -138,6 +138,7 @@ fn standard_line<'a>(i: &'a str) -> IResult<&'a str, TimestampedTag<'a>> {
     .parse(i)
 }
 
+// FIX: Parsing should fail if there are ID tags after timed tags
 fn parse_line<'a>(i: &'a str) -> IResult<&'a str, Line<'a>> {
     alt((
         map(line_with_a2, Line::Tag),
