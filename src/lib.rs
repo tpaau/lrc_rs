@@ -14,6 +14,48 @@ pub use nom::error::ErrorKind;
 #[cfg(feature = "log")]
 use log::warn;
 
+#[cfg(feature = "parser")]
+fn duration_offset<'a>(dur: Duration, offset_ms: i64) -> Result<Duration, ParseError<'a>> {
+    match offset_ms.try_into() {
+        Ok(offset) => match dur.checked_add(Duration::from_millis(offset)) {
+            Some(dur) => Ok(dur),
+            None => Err(ParseError::TimestampOffsetOverflow),
+        },
+        Err(_) => match dur.checked_sub(Duration::from_millis(offset_ms.unsigned_abs())) {
+            Some(dur) => Ok(dur),
+            None => Err(ParseError::TimestampOffsetOverflow),
+        },
+    }
+}
+
+// Ensures that the number of digits in a fraction is always 2, so for example:
+// 139 -> 14
+// 1 -> 10
+fn normalize_fraction(frac: u32) -> u32 {
+    let digits = frac.checked_ilog10().unwrap_or(0) + 1;
+    match digits {
+        1 => frac * 10,
+        2 => frac,
+        _ => (frac as f64 / 10u32.pow(digits - 2) as f64).round() as u32,
+    }
+}
+
+fn duration_to_timestamp(dur: Duration) -> String {
+    let secs = dur.as_secs_f64();
+    let cs = normalize_fraction((dur.subsec_millis() as f64 / 10.0).round() as u32);
+    let mins = (secs / 60.0).floor();
+    let secs = (secs - mins * 60.0).floor();
+    format!("{mins:02}:{secs:02}.{cs:02}")
+}
+
+fn duration_to_standard_timestamp<'a>(dur: Duration) -> String {
+    format!("[{}]", duration_to_timestamp(dur))
+}
+
+fn duration_to_a2_timestamp(dur: Duration) -> String {
+    format!("<{}>", duration_to_timestamp(dur))
+}
+
 /// Error indicating why lyrics couldn't be parsed as LRC.
 #[cfg(feature = "parser")]
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -90,6 +132,13 @@ impl<'a> From<parser::TimestampedSegment<'a>> for SegmentTag {
 }
 
 impl SegmentTag {
+    fn serialize(self, a2_tag: bool) -> String {
+        match a2_tag {
+            true => duration_to_a2_timestamp(self.timestamp) + " " + &self.content,
+            false => self.content,
+        }
+    }
+
     /// Checks if the segment is active at the given timestamp.
     pub fn is_active(&self, timestamp: Duration) -> bool {
         self.timestamp < timestamp
@@ -147,6 +196,32 @@ impl LineTag {
         }
         Ok(())
     }
+
+    fn serialize(self) -> String {
+        if self.segments.len() > 1
+            || self.segments.len() == 1 && (self.segments[0].timestamp > self.timestamp)
+        {
+            duration_to_standard_timestamp(self.timestamp)
+                + " "
+                + &self
+                    .segments
+                    .into_iter()
+                    .map(|s| s.serialize(true))
+                    .collect::<Vec<_>>()
+                    .join("")
+        } else if self.segments.len() == 1 {
+            duration_to_standard_timestamp(self.timestamp)
+                + " "
+                + &self
+                    .segments
+                    .into_iter()
+                    .map(|s| s.serialize(false))
+                    .collect::<Vec<_>>()
+                    .join("")
+        } else {
+            duration_to_standard_timestamp(self.timestamp)
+        }
+    }
 }
 
 /// The player or editor that created the LRC file
@@ -173,10 +248,10 @@ pub struct SyncedLyrics {
     pub lyricist: Option<String>,
     /// Length of the song
     pub length: Option<Duration>,
-    /// The player or editor that created the LRC file
-    pub tool: Option<LRCTool>,
     /// Author of the LRC file (not the song)
     pub file_author: Option<String>,
+    /// The player or editor that created the LRC file
+    pub tool: Option<LRCTool>,
     /// Comments found in the lyrics
     ///
     /// **NOTE**: This field is omitted when serializing to LRC.
@@ -239,9 +314,109 @@ impl SyncedLyrics {
         false
     }
 
-    /// Serialize the struct to LRC format.
-    pub fn serialize(self) -> String {
+    pub fn validate_timestamp_order() {
         todo!()
+    }
+
+    fn serialize_id_tag(key: &str, value: &str, newline: bool) -> String {
+        if newline {
+            format!("\n[{key}:{value}]")
+        } else {
+            format!("[{key}:{value}]")
+        }
+    }
+
+    fn format_duration_mm_ss(dur: Duration) -> String {
+        let secs = dur.as_secs();
+        let mins = secs / 60;
+        let secs = secs - mins * 60;
+        format!("{mins}:{secs}")
+    }
+
+    /// Serialize the struct to LRC format.
+    ///
+    /// **NOTE**: This function may not always produce the same output as the input parsed to create
+    /// the serialized data structure. For instance, the original placement of ID tags and comments
+    /// is not retained, and the offset tag is omitted as it is applied by the parser.
+    #[cfg_attr(
+        feature = "parser",
+        doc = r#"
+
+It should, however, always produce the same result for input serialized from its output.
+
+For instance:
+```rust
+# use lrc_rs::SyncedLyrics;
+let input = include_str!("../assets/example.lrc");
+let parsed = SyncedLyrics::parse(&input).unwrap();
+let parsed_twice = SyncedLyrics::parse(&parsed.clone().serialize())
+    .unwrap()
+    .serialize();
+assert_eq!(parsed.serialize(), parsed_twice);
+ ```"#
+    )]
+    pub fn serialize(self) -> String {
+        let mut result = String::new();
+        if let Some(title) = self.title {
+            result += &Self::serialize_id_tag("ti", &title, false);
+        }
+        if let Some(artist) = self.artist {
+            result += &Self::serialize_id_tag("ar", &artist, !result.is_empty());
+        }
+        if let Some(album) = self.album {
+            result += &Self::serialize_id_tag("al", &album, !result.is_empty());
+        }
+        if let Some(author) = self.author {
+            result += &Self::serialize_id_tag("au", &author, !result.is_empty());
+        }
+        if let Some(lyricist) = self.lyricist {
+            result += &Self::serialize_id_tag("lr", &lyricist, !result.is_empty());
+        }
+        if let Some(length) = self.length {
+            result += &Self::serialize_id_tag(
+                "length",
+                Self::format_duration_mm_ss(length).as_ref(),
+                !result.is_empty(),
+            );
+        }
+        if let Some(author) = self.file_author {
+            result += &Self::serialize_id_tag("by", &author, !result.is_empty());
+        }
+        if let Some(tool) = self.tool {
+            result += &Self::serialize_id_tag("tool", &tool.name, !result.is_empty());
+            if let Some(tool_version) = tool.version {
+                result += &Self::serialize_id_tag("ve", &tool_version, true);
+            }
+        }
+        let comments = self
+            .comments
+            .into_iter()
+            .map(|c| Self::serialize_id_tag("#", &c, false))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let lines = self
+            .lines
+            .into_iter()
+            .map(|l| l.serialize())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !comments.is_empty() {
+            if result.is_empty() {
+                result += &comments;
+            } else {
+                result += "\n";
+                result += &comments;
+            }
+        }
+        if !lines.is_empty() {
+            if result.is_empty() {
+                result += &lines;
+            } else {
+                result += "\n";
+                result += &lines;
+            }
+        }
+        result
     }
 
     /// Parses LRC lyrics data.
@@ -349,22 +524,5 @@ impl SyncedLyrics {
                 Err(ParseError::from(e))
             }
         }
-    }
-}
-
-#[cfg(feature = "parser")]
-pub(crate) fn duration_offset<'a>(
-    dur: Duration,
-    offset_ms: i64,
-) -> Result<Duration, ParseError<'a>> {
-    match offset_ms.try_into() {
-        Ok(offset) => match dur.checked_add(Duration::from_millis(offset)) {
-            Some(dur) => Ok(dur),
-            None => Err(ParseError::TimestampOffsetOverflow),
-        },
-        Err(_) => match dur.checked_sub(Duration::from_millis(offset_ms.unsigned_abs())) {
-            Some(dur) => Ok(dur),
-            None => Err(ParseError::TimestampOffsetOverflow),
-        },
     }
 }

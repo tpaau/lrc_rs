@@ -50,7 +50,7 @@ fn timestamp() {
         parser::timestamp(""),
         Err(nom::Err::Error(nom::error::Error::new(
             "",
-            ErrorKind::Float
+            ErrorKind::Digit
         )))
     );
     assert_eq!(
@@ -58,6 +58,13 @@ fn timestamp() {
         Err(nom::Err::Error(nom::error::Error::new(
             ":21.5",
             ErrorKind::Float
+        )))
+    );
+    assert_eq!(
+        parser::timestamp("01.15:28.23"),
+        Err(nom::Err::Error(nom::error::Error::new(
+            ".15:28.23",
+            ErrorKind::Char
         )))
     );
 }
