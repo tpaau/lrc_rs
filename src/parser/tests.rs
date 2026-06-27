@@ -504,3 +504,14 @@ fn parse() {
         expected
     );
 }
+
+#[test]
+fn id_tags_after_timed_tags_fail() {
+    assert_eq!(
+        parser::parse(include_str!("../../assets/wrong-id-tags-positioning.lrc")),
+        Err(nom::error::Error::new(
+            "[ar:I shouldn't be here]\n",
+            ErrorKind::Eof
+        ))
+    );
+}

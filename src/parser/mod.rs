@@ -138,18 +138,25 @@ fn standard_line<'a>(i: &'a str) -> IResult<&'a str, TimestampedTag<'a>> {
     .parse(i)
 }
 
-// FIX: Parsing should fail if there are ID tags after timed tags
-fn parse_line<'a>(i: &'a str) -> IResult<&'a str, Line<'a>> {
-    alt((
-        map(line_with_a2, Line::Tag),
-        map(standard_line, Line::Tag),
-        map(comment, Line::Comment),
-        map(id_tag, Line::ID),
-    ))
-    .parse(i)
-}
-
 pub(crate) fn parse<'a>(i: &'a str) -> Result<Vec<Line<'a>>, nom::error::Error<&'a str>> {
-    let (_, (lines, _)) = (many0(parse_line), eof).parse(i).finish()?;
+    let (_, (lines, _)) = (
+        map(
+            (
+                many0(alt((map(comment, Line::Comment), map(id_tag, Line::ID)))),
+                many0(alt((
+                    map(comment, Line::Comment),
+                    map(line_with_a2, Line::Tag),
+                    map(standard_line, Line::Tag),
+                ))),
+            ),
+            |(mut a, b)| {
+                a.extend(b.into_iter());
+                a
+            },
+        ),
+        eof,
+    )
+        .parse(i)
+        .finish()?;
     Ok(lines)
 }
