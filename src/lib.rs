@@ -1,4 +1,6 @@
 #![doc = include_str!("../README.md")]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![feature(doc_cfg)]
 #[cfg(feature = "parser")]
 mod parser;
 #[cfg(test)]
@@ -40,6 +42,7 @@ fn normalize_fraction(frac: u32) -> u32 {
     }
 }
 
+// Formats [`Duration`] as mm:ss:cs for timed tags
 fn duration_to_timestamp(dur: Duration) -> String {
     let secs = dur.as_secs_f64();
     let cs = normalize_fraction((dur.subsec_millis() as f64 / 10.0).round() as u32);
@@ -61,14 +64,14 @@ fn duration_to_a2_timestamp(dur: Duration) -> String {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ParseError<'a> {
     /// An overflow occurred while offsetting timestamps with the value of the LRC `offset` tag
-    /// (eg. `[offset: +100]`).
+    /// (eg. `[offset: -100]`).
     ///
-    /// Try adjusting the offset value or removing the offset tag.
+    /// Try adjusting the offset value or removing the offset tag entirely.
     TimestampOffsetOverflow,
     /// Encountered an ID tag with an unknown key.
     ///
     /// Remove the broken tag.
-    UnknownKey(&'a str),
+    UnknownKey { key: &'a str },
     /// Parsing failed due to a syntax error.
     Nom {
         /// The input for which the error occurred.
@@ -95,7 +98,7 @@ impl<'a> std::fmt::Display for ParseError<'a> {
             Self::TimestampOffsetOverflow => {
                 write!(f, "An overflow occurred while offsetting a timestamp")
             }
-            Self::UnknownKey(key) => write!(f, "Unknown ID tag key: \"{key}\""),
+            Self::UnknownKey { key } => write!(f, "Unknown ID tag key: \"{key}\""),
             Self::Nom { input, error } => {
                 write!(f, "Couldn't parse the lyrics at `{input}`: {error:?}`")
             }
@@ -110,6 +113,9 @@ pub trait LyricsAccess: Sized {
     /// Returns lyrics content active at the timestamp or [`None`] if there is no content for the
     /// given timestamp.
     fn lyrics_at(&self, timestamp: Duration) -> Option<&str>;
+    /// Check if timed tag timestamps are ordered in ascending order.
+    ///
+    /// The first [segment tag](SegmentTag) may have the same timestamp as its [line](LineTag).
     fn is_timestamp_order_valid(&self) -> bool;
 }
 
@@ -146,12 +152,12 @@ impl SegmentTag {
     }
 }
 
-/// A single line in the synced lyrics.
+/// A single line in the [synced lyrics](SyncedLyrics).
 ///
 /// With regular LRC files, this will contain at most one element. If the enhanced LRC format is
 /// used, it may contain more elements.
 ///
-/// You can check if the enhanced LRC format is used with the
+/// You can check if the enhanced LRC format is in use with the
 /// [`is_enhanced_lrc`](SyncedLyrics::is_enhanced_lrc) method.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct LineTag {
@@ -161,9 +167,11 @@ pub struct LineTag {
     pub timestamp: Duration,
     /// Timestamped segments of the line.
     ///
-    /// Segments in lines with A2 tags can have timestamps that are later than the line timestamp.
-    /// With regular LRC, there will always be at most one segment with the same timestamp as the
-    /// line timestamp.
+    /// With the A2 extension, the first segment may have a timestamp that is later than the line
+    /// timestamp.
+    ///
+    /// With regular LRC, the timestamp of the first segment will always be the same as the line
+    /// timestamp.
     pub segments: Vec<SegmentTag>,
 }
 
@@ -187,6 +195,9 @@ impl LyricsAccess for LineTag {
         todo!()
     }
 
+    // NOTE: If a line has only one segment, its timestamp doesn't have to be the same as the
+    // timestamp of the line. The window between the line timestamp and the timestamp of the first
+    // tag is when no segment is active. It does indicate that the A2 extension is active, though.
     fn is_timestamp_order_valid(&self) -> bool {
         if self.segments.is_empty() {
             true
@@ -255,39 +266,37 @@ impl LineTag {
     }
 }
 
-/// The player or editor that created the LRC file
+/// Info on the player or editor that created the LRC file.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct LRCTool {
-    /// Name of the program
+    /// Name of the program.
     pub name: String,
-    /// Version of the program
+    /// Version of the program.
     pub version: Option<String>,
 }
 
 /// Lyrics grouped into timestamped segments with additional metadata.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct SyncedLyrics {
-    /// Title of the song
+    /// Title of the song.
     pub title: Option<String>,
-    /// Artist performing the song
+    /// Artist performing the song.
     pub artist: Option<String>,
-    /// Album the song is from
+    /// Album the song is from.
     pub album: Option<String>,
-    /// Author of the song
+    /// Author of the song.
     pub author: Option<String>,
-    /// Lyricist of the song
+    /// Lyricist of the song.
     pub lyricist: Option<String>,
-    /// Length of the song
+    /// Length of the song.
     pub length: Option<Duration>,
-    /// Author of the LRC file (not the song)
+    /// Author of the LRC file (not the song).
     pub file_author: Option<String>,
-    /// The player or editor that created the LRC file
+    /// Info on the player or editor that created the LRC file.
     pub tool: Option<LRCTool>,
-    /// Comments found in the lyrics
-    ///
-    /// **NOTE**: This field is omitted when serializing to LRC.
+    /// Comments found in the lyrics.
     pub comments: Vec<String>,
-    /// LRC segments grouped by lines
+    /// LRC segments grouped by lines.
     pub lines: Vec<LineTag>,
 }
 
@@ -350,6 +359,7 @@ impl SyncedLyrics {
         }
     }
 
+    /// Create an empty synced lyrics struct with some line segments.
     pub fn new_with_tags(tags: Vec<LineTag>) -> Self {
         Self {
             title: None,
@@ -367,7 +377,9 @@ impl SyncedLyrics {
 
     /// Checks if the lyrics contain any tags from the A2 extension.
     ///
-    /// If the enhanced LRC format is used, [line tags](LineTag) may contain more than one segment.
+    /// If the enhanced LRC format is used, [line tags](LineTag) may contain more than one segment,
+    /// and the first [segments](SegmentTag) in [line tags](LineTag) may have a timestamp that is
+    /// later than the line timestamp.
     pub fn is_enhanced_lrc(&self) -> bool {
         for line in &self.lines {
             if line.segments.is_empty() {
@@ -379,10 +391,6 @@ impl SyncedLyrics {
             }
         }
         false
-    }
-
-    pub fn validate_timestamp_order() {
-        todo!()
     }
 
     fn serialize_id_tag(key: &str, value: &str, newline: bool) -> String {
@@ -403,8 +411,8 @@ impl SyncedLyrics {
     /// Serialize the struct to LRC format.
     ///
     /// **NOTE**: This function may not always produce the same output as the input parsed to create
-    /// the serialized data structure. For instance, the original placement of ID tags and comments
-    /// is not retained, and the offset tag is omitted as it is applied by the parser.
+    /// the [`SyncedLyrics`] data structure. For instance, the original placement of ID tags and
+    /// comments is not retained, and the offset tag is omitted as it is applied by the parser.
     #[cfg_attr(
         feature = "parser",
         doc = r#"
@@ -537,7 +545,7 @@ assert_eq!(parsed.serialize(), parsed_twice);
                         "ve" => tool_version = Some(tag.value.to_string()),
                         _ => {
                             warn!("Unknown ID tag key \"{}\"", tag.key);
-                            return Err(ParseError::UnknownKey(tag.key));
+                            return Err(ParseError::UnknownKey { key: tag.key });
                         }
                     }
                 }
