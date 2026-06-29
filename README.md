@@ -5,6 +5,8 @@ Robust crate for working with synced lyrics content in the LRC format.
 It uses the [`nom`]() crate for all the parsing, and has support for the A2 extension (enhanced
 LRC).
 
+Docs can be found [here](https://tpaau.github.io/lrc_rs/lrc_rs/).
+
 ## Features
 - Reliable parser built with the [`nom`](https://crates.io/crates/nom) crate
 - Coverage of all the ID tags and comment tags

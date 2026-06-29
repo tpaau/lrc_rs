@@ -1,5 +1,4 @@
 #![doc = include_str!("../README.md")]
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![feature(doc_cfg)]
 #[cfg(feature = "parser")]
 mod parser;
@@ -17,15 +16,15 @@ pub use nom::error::ErrorKind;
 use log::warn;
 
 #[cfg(feature = "parser")]
-fn duration_offset<'a>(dur: Duration, offset_ms: i64) -> Result<Duration, ParseError<'a>> {
+fn duration_offset<'a>(dur: Duration, offset_ms: i64) -> Result<Duration, Error> {
     match offset_ms.try_into() {
         Ok(offset) => match dur.checked_add(Duration::from_millis(offset)) {
             Some(dur) => Ok(dur),
-            None => Err(ParseError::TimestampOffsetOverflow),
+            None => Err(Error::TimestampOffsetOverflow),
         },
         Err(_) => match dur.checked_sub(Duration::from_millis(offset_ms.unsigned_abs())) {
             Some(dur) => Ok(dur),
-            None => Err(ParseError::TimestampOffsetOverflow),
+            None => Err(Error::TimestampOffsetOverflow),
         },
     }
 }
@@ -60,45 +59,54 @@ fn duration_to_a2_timestamp(dur: Duration) -> String {
 }
 
 /// Error indicating why lyrics couldn't be parsed as LRC.
-#[cfg(feature = "parser")]
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum ParseError<'a> {
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Error {
     /// An overflow occurred while offsetting timestamps with the value of the LRC `offset` tag
     /// (eg. `[offset: -100]`).
     ///
     /// Try adjusting the offset value or removing the offset tag entirely.
+    #[cfg(feature = "parser")]
     TimestampOffsetOverflow,
     /// Encountered an ID tag with an unknown key.
     ///
     /// Remove the broken tag.
-    UnknownKey { key: &'a str },
+    #[cfg(feature = "parser")]
+    UnknownKey { key: String },
+    /// Tag timestamps had invalid order.
+    InvalidTagOrder { index: usize, message: String },
     /// Parsing failed due to a syntax error.
+    #[cfg(feature = "parser")]
     Nom {
         /// The input for which the error occurred.
-        input: &'a str,
+        input: String,
         /// The error code.
         error: nom::error::ErrorKind,
     },
 }
 
 #[cfg(feature = "parser")]
-impl<'a> From<nom::error::Error<&'a str>> for ParseError<'a> {
-    fn from(value: nom::error::Error<&'a str>) -> Self {
+impl<'a> From<nom::error::Error<&str>> for Error {
+    fn from(value: nom::error::Error<&str>) -> Self {
         Self::Nom {
-            input: value.input,
+            input: value.input.to_string(),
             error: value.code,
         }
     }
 }
 
-#[cfg(feature = "parser")]
-impl<'a> std::fmt::Display for ParseError<'a> {
+impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            #[cfg(feature = "parser")]
             Self::TimestampOffsetOverflow => {
                 write!(f, "An overflow occurred while offsetting a timestamp")
             }
+            #[cfg(feature = "parser")]
             Self::UnknownKey { key } => write!(f, "Unknown ID tag key: \"{key}\""),
+            Self::InvalidTagOrder { index, message } => {
+                write!(f, "Invalid tag timestamp at index {index}: {message}")
+            }
+            #[cfg(feature = "parser")]
             Self::Nom { input, error } => {
                 write!(f, "Couldn't parse the lyrics at `{input}`: {error:?}`")
             }
@@ -116,7 +124,7 @@ pub trait LyricsAccess: Sized {
     /// Check if timed tag timestamps are ordered in ascending order.
     ///
     /// The first [segment tag](SegmentTag) may have the same timestamp as its [line](LineTag).
-    fn is_timestamp_order_valid(&self) -> bool;
+    fn check_timestamp_order<'a>(&'a self) -> Result<(), Error>;
 }
 
 /// Segment of lyrics in a [single line](LineTag), associated with a timestamp.
@@ -149,6 +157,18 @@ impl SegmentTag {
     /// Checks if the segment is active at the given timestamp.
     pub fn is_active(&self, timestamp: Duration) -> bool {
         self.timestamp >= timestamp
+    }
+
+    /// Set the timestamp of the segment.
+    pub fn timestamp(&mut self, timestamp: Duration) -> &mut Self {
+        self.timestamp = timestamp;
+        self
+    }
+
+    /// Set the content of the segment.
+    pub fn content(&mut self, content: String) -> &mut Self {
+        self.content = content;
+        self
     }
 }
 
@@ -198,33 +218,42 @@ impl LyricsAccess for LineTag {
     // NOTE: If a line has only one segment, its timestamp doesn't have to be the same as the
     // timestamp of the line. The window between the line timestamp and the timestamp of the first
     // tag is when no segment is active. It does indicate that the A2 extension is active, though.
-    fn is_timestamp_order_valid(&self) -> bool {
+    fn check_timestamp_order<'a>(&'a self) -> Result<(), Error> {
         if self.segments.is_empty() {
-            true
+            Ok(())
         } else {
             let mut ts;
             if self.segments[0].timestamp < self.timestamp {
-                return false;
+                return Err(Error::InvalidTagOrder {
+                    index: 0,
+                    message: format!(
+                        "Expected a timestamp later than or equal to {:?}",
+                        self.timestamp
+                    ),
+                });
             } else if self.segments.len() == 1 {
-                return true;
+                return Ok(());
             } else {
                 ts = &self.segments[0].timestamp;
             }
-            for segment in &self.segments[1..self.segments.len()] {
+            for (i, segment) in self.segments[1..self.segments.len()].iter().enumerate() {
                 if segment.timestamp <= *ts {
-                    return false;
+                    return Err(Error::InvalidTagOrder {
+                        index: i + 1,
+                        message: format!("Expected a timestamp later than {ts:?}"),
+                    });
                 } else {
                     ts = &segment.timestamp;
                 }
             }
-            true
+            Ok(())
         }
     }
 }
 
 impl LineTag {
     #[cfg(feature = "parser")]
-    fn offset<'a>(&mut self, offset_ms: i64) -> Result<(), ParseError<'a>> {
+    fn offset<'a>(&mut self, offset_ms: i64) -> Result<(), Error> {
         self.timestamp = duration_offset(self.timestamp, offset_ms)?;
         for segment in self.segments.iter_mut() {
             segment.timestamp = duration_offset(segment.timestamp, offset_ms)?;
@@ -264,6 +293,60 @@ impl LineTag {
             duration_to_standard_timestamp(self.timestamp)
         }
     }
+
+    /// Set the timestamp of the line.
+    pub fn timestamp(&mut self, timestamp: Duration) -> &mut Self {
+        self.timestamp = timestamp;
+        self
+    }
+
+    /// Add a segment to the line.
+    pub fn segment<'a>(&'a mut self, segment: SegmentTag) -> Result<&'a mut Self, Error> {
+        self.segments(&[segment])
+    }
+
+    pub fn segments<'a>(&'a mut self, segments: &[SegmentTag]) -> Result<&'a mut Self, Error> {
+        if segments.is_empty() {
+            Ok(self)
+        } else if self.segments.is_empty() {
+            if segments[0].timestamp < self.timestamp {
+                return Err(Error::InvalidTagOrder {
+                    index: 0,
+                    message: format!(
+                        "Expected a timestamp later than or equal to {:?}",
+                        self.timestamp
+                    ),
+                });
+            }
+            let mut ts = &self.timestamp;
+            for (i, segment) in segments[1..segments.len()].iter().enumerate() {
+                if segment.timestamp <= *ts {
+                    return Err(Error::InvalidTagOrder {
+                        index: i + 1,
+                        message: format!("Expected a timestamp later than {ts:?}"),
+                    });
+                } else {
+                    ts = &segment.timestamp;
+                }
+            }
+            self.segments.extend_from_slice(segments);
+            Ok(self)
+        } else {
+            let mut ts = self.last_timestamp();
+            for (i, segment) in segments.iter().enumerate() {
+                if segment.timestamp <= *ts {
+                    return Err(Error::InvalidTagOrder {
+                        index: i,
+                        message: format!("Expected a timestamp later than {ts:?}"),
+                    });
+                } else {
+                    ts = &segment.timestamp;
+                }
+            }
+            self.segments.extend_from_slice(segments);
+            Ok(self)
+        }
+    }
 }
 
 /// Info on the player or editor that created the LRC file.
@@ -273,6 +356,18 @@ pub struct LRCTool {
     pub name: String,
     /// Version of the program.
     pub version: Option<String>,
+}
+
+impl LRCTool {
+    pub fn name(&mut self, name: String) -> &mut Self {
+        self.name = name;
+        self
+    }
+
+    pub fn version(&mut self, version: Option<String>) -> &mut Self {
+        self.version = version;
+        self
+    }
 }
 
 /// Lyrics grouped into timestamped segments with additional metadata.
@@ -310,31 +405,40 @@ impl LyricsAccess for SyncedLyrics {
         todo!()
     }
 
-    fn is_timestamp_order_valid(&self) -> bool {
-        if self.lines.len() == 0 {
-            return true;
+    fn check_timestamp_order<'a>(&'a self) -> Result<(), Error> {
+        if self.lines.is_empty() {
+            return Ok(());
         } else {
-            if !self.lines[0].is_timestamp_order_valid() {
-                return false;
+            if let Err(e) = self.lines[0].check_timestamp_order() {
+                return Err(Error::InvalidTagOrder {
+                    index: 0,
+                    message: format!("{e}"),
+                });
             }
             let mut ts = self.lines[0].last_timestamp();
-            for line in &self.lines[1..self.lines.len()] {
-                if !line.is_timestamp_order_valid() {
-                    return false;
+            for (i, line) in self.lines[1..self.lines.len()].iter().enumerate() {
+                if let Err(e) = line.check_timestamp_order() {
+                    return Err(Error::InvalidTagOrder {
+                        index: i + 1,
+                        message: format!("{e}"),
+                    });
                 } else if line.timestamp <= *ts {
-                    return false;
+                    return Err(Error::InvalidTagOrder {
+                        index: i + 1,
+                        message: format!("Expected a timestamp later than {ts:?}"),
+                    });
                 } else {
                     ts = line.last_timestamp();
                 }
             }
-            true
+            Ok(())
         }
     }
 }
 
 impl SyncedLyrics {
     #[cfg(feature = "parser")]
-    fn parse_len<'a>(i: &'a str) -> Result<Duration, ParseError<'a>> {
+    fn parse_len<'a>(i: &'a str) -> Result<Duration, Error> {
         use nom::{Parser, combinator::eof};
 
         match (parser::timestamp, eof).parse(i).finish() {
@@ -342,21 +446,114 @@ impl SyncedLyrics {
             Err(e) => {
                 #[cfg(feature = "log")]
                 warn!("Couldn't parse timestamp value: {e}");
-                Err(ParseError::from(e))
+                Err(Error::from(e))
             }
         }
     }
 
     #[cfg(feature = "parser")]
-    fn parse_offset<'a>(i: &'a str) -> Result<i64, ParseError<'a>> {
+    fn parse_offset<'a>(i: &'a str) -> Result<i64, Error> {
         match parser::offset(i).finish() {
             Ok((_, offset)) => Ok(offset),
             Err(e) => {
                 #[cfg(feature = "log")]
                 warn!("Couldn't parse offset value: {e}");
-                Err(ParseError::from(e))
+                Err(Error::from(e))
             }
         }
+    }
+
+    // DOCS: Document this
+    pub fn title(&mut self, title: Option<String>) -> &mut Self {
+        self.title = title;
+        self
+    }
+
+    pub fn artist(&mut self, artist: Option<String>) -> &mut Self {
+        self.artist = artist;
+        self
+    }
+
+    pub fn album(&mut self, album: Option<String>) -> &mut Self {
+        self.album = album;
+        self
+    }
+
+    pub fn author(&mut self, author: Option<String>) -> &mut Self {
+        self.author = author;
+        self
+    }
+
+    pub fn lyricist(&mut self, lyricist: Option<String>) -> &mut Self {
+        self.lyricist = lyricist;
+        self
+    }
+
+    pub fn length(&mut self, length: Option<Duration>) -> &mut Self {
+        self.length = length;
+        self
+    }
+
+    pub fn file_author(&mut self, file_author: Option<String>) -> &mut Self {
+        self.file_author = file_author;
+        self
+    }
+
+    pub fn tool(&mut self, tool: Option<LRCTool>) -> &mut Self {
+        self.tool = tool;
+        self
+    }
+
+    pub fn comment(&mut self, comment: String) -> &mut Self {
+        self.comments.push(comment);
+        self
+    }
+
+    pub fn comments(&mut self, comments: &[String]) -> &mut Self {
+        self.comments.extend_from_slice(comments);
+        self
+    }
+
+    pub fn line(&mut self, line: LineTag) -> Result<&mut Self, Error> {
+        self.lines(&[line])
+    }
+
+    pub fn lines(&mut self, lines: &[LineTag]) -> Result<&mut Self, Error> {
+        if lines.is_empty() {
+            return Ok(self);
+        } else if let Err(e) = lines[0].check_timestamp_order() {
+            return Err(Error::InvalidTagOrder {
+                index: 0,
+                message: format!("{e}"),
+            });
+        }
+        if !self.lines.is_empty() {
+            let ts = *self.lines[self.lines.len() - 1].last_timestamp();
+            if lines[0].timestamp <= ts {
+                return Err(Error::InvalidTagOrder {
+                    index: 0,
+                    message: format!("Expected a timestamp later than {:?}", ts),
+                });
+            }
+        }
+        let mut ts = lines[0].last_timestamp();
+        for (i, line) in lines[1..lines.len()].iter().enumerate() {
+            if let Err(e) = line.check_timestamp_order() {
+                return Err(Error::InvalidTagOrder {
+                    index: i + 1,
+                    message: format!("{e}"),
+                });
+            }
+            if line.timestamp <= *ts {
+                return Err(Error::InvalidTagOrder {
+                    index: i + 1,
+                    message: format!("Expected a timestamp later than {:?}", ts),
+                });
+            }
+            ts = &line.timestamp;
+        }
+        self.lines.extend_from_slice(lines);
+        Ok(self)
     }
 
     /// Create an empty synced lyrics struct with some line segments.
@@ -496,7 +693,7 @@ assert_eq!(parsed.serialize(), parsed_twice);
 
     /// Parses LRC lyrics data.
     #[cfg(feature = "parser")]
-    pub fn parse<'a>(input: &'a str) -> Result<Self, ParseError<'a>> {
+    pub fn parse<'a>(input: &'a str) -> Result<Self, Error> {
         match parser::parse(input) {
             Ok(lines) => {
                 use crate::parser::Line;
@@ -545,7 +742,9 @@ assert_eq!(parsed.serialize(), parsed_twice);
                         "ve" => tool_version = Some(tag.value.to_string()),
                         _ => {
                             warn!("Unknown ID tag key \"{}\"", tag.key);
-                            return Err(ParseError::UnknownKey { key: tag.key });
+                            return Err(Error::UnknownKey {
+                                key: tag.key.to_string(),
+                            });
                         }
                     }
                 }
@@ -563,7 +762,7 @@ assert_eq!(parsed.serialize(), parsed_twice);
                     }
                 };
                 let lines = if let Some(offset) = offset {
-                    let lines: Result<Vec<_>, ParseError<'a>> = lines
+                    let lines: Result<Vec<_>, Error> = lines
                         .into_iter()
                         .filter_map(|l| if let Line::Tag(t) = l { Some(t) } else { None })
                         .map(|t| t.into())
@@ -580,6 +779,24 @@ assert_eq!(parsed.serialize(), parsed_twice);
                         .map(|t| t.into())
                         .collect()
                 };
+                let mut timestamp = None;
+                for (i, line) in lines.iter().enumerate() {
+                    if let Err(e) = line.check_timestamp_order() {
+                        return Err(Error::InvalidTagOrder {
+                            index: i,
+                            message: format!("{e}"),
+                        });
+                    }
+                    if let Some(ts) = timestamp {
+                        if line.last_timestamp() <= ts {
+                            return Err(Error::InvalidTagOrder {
+                                index: i,
+                                message: format!("Expected a timestamp later than {ts:?}"),
+                            });
+                        }
+                    }
+                    timestamp = Some(line.last_timestamp())
+                }
                 Ok(SyncedLyrics {
                     title,
                     artist,
@@ -596,7 +813,7 @@ assert_eq!(parsed.serialize(), parsed_twice);
             Err(e) => {
                 #[cfg(feature = "log")]
                 warn!("Couldn't parse the LRC content: {e}");
-                Err(ParseError::from(e))
+                Err(Error::from(e))
             }
         }
     }

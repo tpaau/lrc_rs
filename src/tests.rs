@@ -1,6 +1,6 @@
 use std::{sync::LazyLock, time::Duration};
 
-use crate::{LRCTool, LineTag, LyricsAccess, SegmentTag, SyncedLyrics};
+use crate::{Error, LRCTool, LineTag, LyricsAccess, SegmentTag, SyncedLyrics};
 
 static PARSED_EXAMPLE: LazyLock<SyncedLyrics> = LazyLock::new(|| SyncedLyrics {
     title: Some("example".to_string()),
@@ -230,8 +230,8 @@ fn serialize() {
 }
 
 #[test]
-fn line_tag_is_timestamp_order_valid() {
-    assert!(LineTag::default().is_timestamp_order_valid());
+fn line_tag_check_timestamp_order() {
+    assert!(LineTag::default().check_timestamp_order().is_ok());
     assert!(
         LineTag {
             timestamp: Duration::from_secs(3),
@@ -240,7 +240,8 @@ fn line_tag_is_timestamp_order_valid() {
                 content: String::new()
             }]
         }
-        .is_timestamp_order_valid()
+        .check_timestamp_order()
+        .is_ok()
     );
     assert!(
         LineTag {
@@ -250,7 +251,8 @@ fn line_tag_is_timestamp_order_valid() {
                 content: String::new()
             }]
         }
-        .is_timestamp_order_valid()
+        .check_timestamp_order()
+        .is_ok()
     );
     assert!(
         LineTag {
@@ -266,10 +268,11 @@ fn line_tag_is_timestamp_order_valid() {
                 }
             ]
         }
-        .is_timestamp_order_valid()
+        .check_timestamp_order()
+        .is_ok()
     );
-    assert!(
-        !LineTag {
+    assert_eq!(
+        LineTag {
             timestamp: Duration::from_secs(3),
             segments: vec![
                 SegmentTag {
@@ -282,14 +285,25 @@ fn line_tag_is_timestamp_order_valid() {
                 }
             ]
         }
-        .is_timestamp_order_valid()
+        .check_timestamp_order(),
+        Err(Error::InvalidTagOrder {
+            index: 1,
+            message: format!(
+                "Expected a timestamp later than {:?}",
+                Duration::from_secs(4)
+            )
+        })
     );
 }
 
 #[test]
-fn synced_lyrics_is_timestamp_order_valid() {
-    assert!(SyncedLyrics::default().is_timestamp_order_valid());
-    assert!(SyncedLyrics::new_with_tags(vec![LineTag::default()]).is_timestamp_order_valid());
+fn synced_lyrics_check_timestamp_order() {
+    assert!(SyncedLyrics::default().check_timestamp_order().is_ok());
+    assert!(
+        SyncedLyrics::new_with_tags(vec![LineTag::default()])
+            .check_timestamp_order()
+            .is_ok()
+    );
     assert!(
         SyncedLyrics::new_with_tags(vec![
             LineTag {
@@ -301,7 +315,8 @@ fn synced_lyrics_is_timestamp_order_valid() {
                 segments: Vec::new()
             }
         ])
-        .is_timestamp_order_valid()
+        .check_timestamp_order()
+        .is_ok()
     );
     assert!(
         SyncedLyrics::new_with_tags(vec![
@@ -336,10 +351,11 @@ fn synced_lyrics_is_timestamp_order_valid() {
                 segments: Vec::new()
             }
         ])
-        .is_timestamp_order_valid()
+        .check_timestamp_order()
+        .is_ok()
     );
-    assert!(
-        !SyncedLyrics::new_with_tags(vec![
+    assert_eq!(
+        SyncedLyrics::new_with_tags(vec![
             LineTag {
                 timestamp: Duration::from_secs(5),
                 segments: vec![SegmentTag {
@@ -352,6 +368,406 @@ fn synced_lyrics_is_timestamp_order_valid() {
                 segments: Vec::new()
             }
         ])
-        .is_timestamp_order_valid()
+        .check_timestamp_order(),
+        Err(Error::InvalidTagOrder {
+            index: 1,
+            message: format!(
+                "Expected a timestamp later than {:?}",
+                Duration::from_secs(6)
+            )
+        })
+    );
+}
+
+#[test]
+#[cfg(feature = "parser")]
+fn parse_invalid_timestamp_order_fail() {
+    assert!(SyncedLyrics::parse("[00:02.10] a\n[00:02.20] b").is_ok());
+    assert_eq!(
+        SyncedLyrics::parse("[00:02.00] a\n[00:02.00] a"),
+        Err(Error::InvalidTagOrder {
+            index: 1,
+            message: format!(
+                "Expected a timestamp later than {:?}",
+                Duration::from_secs(2)
+            )
+        })
+    );
+    assert_eq!(
+        SyncedLyrics::parse("[00:02.00] a\n[00:01.00] b"),
+        Err(Error::InvalidTagOrder {
+            index: 1,
+            message: format!(
+                "Expected a timestamp later than {:?}",
+                Duration::from_secs(2)
+            )
+        })
+    );
+    assert_eq!(
+        SyncedLyrics::parse("[00:02.00] <00:02.30> a <00:02.20> b \n[00:02.90] c"),
+        Err(Error::InvalidTagOrder {
+            index: 0,
+            message: format!(
+                "Invalid tag timestamp at index 1: Expected a timestamp later than {:?}",
+                Duration::from_secs_f32(2.3)
+            )
+        })
+    );
+}
+
+#[test]
+fn line_tag_add_segment() {
+    let mut line = LineTag::default();
+    line.timestamp(Duration::from_secs_f32(0.5));
+    let segment = SegmentTag {
+        timestamp: Duration::from_secs(1),
+        content: String::new(),
+    };
+    assert!(line.segment(segment.clone()).is_ok());
+    assert_eq!(
+        line,
+        LineTag {
+            timestamp: Duration::from_secs_f32(0.5),
+            segments: vec![segment]
+        }
+    );
+
+    let mut line = LineTag::default();
+    line.timestamp(Duration::from_secs(1));
+    let segment = SegmentTag {
+        timestamp: Duration::from_secs(1),
+        content: String::new(),
+    };
+    assert!(line.segment(segment.clone()).is_ok(),);
+    assert_eq!(
+        line,
+        LineTag {
+            timestamp: Duration::from_secs(1),
+            segments: vec![segment]
+        }
+    );
+
+    let mut line = LineTag::default();
+    line.timestamp(Duration::from_secs(1));
+    let segment = SegmentTag {
+        timestamp: Duration::from_secs_f32(0.5),
+        content: String::new(),
+    };
+    assert_eq!(
+        line.segment(segment),
+        Err(Error::InvalidTagOrder {
+            index: 0,
+            message: format!(
+                "Expected a timestamp later than or equal to {:?}",
+                Duration::from_secs(1)
+            )
+        })
+    );
+    assert_eq!(
+        line,
+        LineTag {
+            timestamp: Duration::from_secs(1),
+            segments: Vec::new()
+        }
+    );
+}
+
+#[test]
+fn line_tag_add_segments() {
+    let mut line = LineTag::default();
+    let segments = &[SegmentTag::default()];
+    assert!(line.segments(segments).is_ok());
+    assert_eq!(
+        line,
+        LineTag {
+            timestamp: Duration::default(),
+            segments: vec![SegmentTag::default()]
+        }
+    );
+
+    let mut line = LineTag::default();
+    let segments = &[SegmentTag {
+        timestamp: Duration::from_secs(1),
+        content: String::new(),
+    }];
+    assert!(line.segments(segments).is_ok());
+    assert_eq!(
+        line,
+        LineTag {
+            timestamp: Duration::default(),
+            segments: vec![SegmentTag {
+                timestamp: Duration::from_secs(1),
+                content: String::new()
+            }]
+        }
+    );
+
+    let mut line = LineTag::default();
+    line.timestamp(Duration::from_secs(1));
+    let segments = &[SegmentTag::default()];
+    assert_eq!(
+        line.segments(segments),
+        Err(Error::InvalidTagOrder {
+            index: 0,
+            message: format!(
+                "Expected a timestamp later than or equal to {:?}",
+                Duration::from_secs(1)
+            )
+        })
+    );
+    assert_eq!(
+        line,
+        LineTag {
+            timestamp: Duration::from_secs(1),
+            segments: Vec::new()
+        }
+    );
+
+    let mut line = LineTag::default();
+    let segments = &[
+        SegmentTag::default(),
+        SegmentTag {
+            timestamp: Duration::from_secs(1),
+            content: String::new(),
+        },
+    ];
+    assert!(line.segments(segments).is_ok());
+    assert_eq!(
+        line,
+        LineTag {
+            timestamp: Duration::default(),
+            segments: segments.to_vec(),
+        }
+    );
+
+    let mut line = LineTag::default();
+    let segments = &[
+        SegmentTag {
+            timestamp: Duration::from_secs(1),
+            content: String::new(),
+        },
+        SegmentTag {
+            timestamp: Duration::from_secs(2),
+            content: String::new(),
+        },
+    ];
+    assert!(line.segments(segments).is_ok());
+    assert_eq!(
+        line,
+        LineTag {
+            timestamp: Duration::default(),
+            segments: segments.to_vec(),
+        }
+    );
+
+    let mut line = LineTag::default();
+    line.timestamp(Duration::from_secs(1));
+    assert_eq!(
+        line.segments(&[
+            SegmentTag::default(),
+            SegmentTag {
+                timestamp: Duration::from_secs(1),
+                content: String::new()
+            }
+        ]),
+        Err(Error::InvalidTagOrder {
+            index: 0,
+            message: format!(
+                "Expected a timestamp later than or equal to {:?}",
+                Duration::from_secs(1)
+            )
+        })
+    );
+
+    let mut line = LineTag::default();
+    line.timestamp(Duration::from_secs(1));
+    assert_eq!(
+        line.segments(&[
+            SegmentTag {
+                timestamp: Duration::from_secs(1),
+                content: String::new()
+            },
+            SegmentTag::default(),
+        ]),
+        Err(Error::InvalidTagOrder {
+            index: 1,
+            message: format!(
+                "Expected a timestamp later than {:?}",
+                Duration::from_secs(1)
+            )
+        })
+    );
+
+    let mut line = LineTag::default();
+    line.timestamp(Duration::from_secs(1));
+    assert_eq!(
+        line.segments(&[
+            SegmentTag {
+                timestamp: Duration::from_secs(1),
+                content: String::new()
+            },
+            SegmentTag {
+                timestamp: Duration::from_secs(1),
+                content: String::new()
+            },
+        ]),
+        Err(Error::InvalidTagOrder {
+            index: 1,
+            message: format!(
+                "Expected a timestamp later than {:?}",
+                Duration::from_secs(1)
+            )
+        })
+    );
+}
+
+#[test]
+fn synced_lyrics_add_line() {
+    let mut lyrics = SyncedLyrics::default();
+    let mut line = LineTag::default();
+    line.segments(&[
+        SegmentTag::default(),
+        SegmentTag {
+            timestamp: Duration::from_secs(1),
+            content: String::new(),
+        },
+    ])
+    .unwrap();
+
+    let expected = SyncedLyrics {
+        lines: vec![line.clone()],
+        ..Default::default()
+    };
+
+    lyrics.line(line.clone()).unwrap();
+    assert_eq!(lyrics, expected);
+
+    let line1 = LineTag {
+        timestamp: Duration::from_secs(2),
+        segments: vec![
+            SegmentTag {
+                timestamp: Duration::from_secs(2),
+                content: String::new(),
+            },
+            SegmentTag {
+                timestamp: Duration::from_secs(2),
+                content: String::new(),
+            },
+        ],
+    };
+    assert_eq!(
+        lyrics.line(line1),
+        Err(Error::InvalidTagOrder {
+            index: 0,
+            message: format!(
+                "Invalid tag timestamp at index 1: Expected a timestamp later than {:?}",
+                Duration::from_secs(2)
+            )
+        })
+    );
+    assert_eq!(lyrics, expected);
+
+    assert_eq!(
+        lyrics.line(LineTag::default()),
+        Err(Error::InvalidTagOrder {
+            index: 0,
+            message: format!(
+                "Expected a timestamp later than {:?}",
+                Duration::from_secs(1)
+            )
+        })
+    );
+    assert_eq!(lyrics, expected);
+}
+
+#[test]
+fn synced_lyrics_add_lines() {
+    let mut lyrics = SyncedLyrics::default();
+    let lines = &[LineTag {
+        timestamp: Duration::default(),
+        segments: vec![SegmentTag::default()],
+    }];
+    lyrics.lines(lines).unwrap();
+    assert_eq!(
+        lyrics,
+        SyncedLyrics {
+            lines: lines.to_vec(),
+            ..Default::default()
+        }
+    );
+    let expected = lyrics.clone();
+
+    assert_eq!(
+        lyrics.lines(&[LineTag {
+            timestamp: Duration::default(),
+            segments: Vec::new(),
+        }]),
+        Err(Error::InvalidTagOrder {
+            index: 0,
+            message: format!("Expected a timestamp later than {:?}", Duration::default())
+        })
+    );
+    assert_eq!(lyrics, expected);
+
+    assert_eq!(
+        lyrics.lines(&[LineTag {
+            timestamp: Duration::from_secs(1),
+            segments: vec![SegmentTag::default()]
+        }]),
+        Err(Error::InvalidTagOrder {
+            index: 0,
+            message: format!(
+                "Invalid tag timestamp at index 0: Expected a timestamp later than or equal to {:?}",
+                Duration::from_secs(1)
+            )
+        })
+    );
+    assert_eq!(lyrics, expected);
+
+    assert_eq!(
+        lyrics.lines(&[LineTag {
+            timestamp: Duration::from_secs(1),
+            segments: vec![
+                SegmentTag {
+                    timestamp: Duration::from_secs(1),
+                    content: String::new()
+                },
+                SegmentTag {
+                    timestamp: Duration::from_secs(1),
+                    content: String::new()
+                }
+            ]
+        }]),
+        Err(Error::InvalidTagOrder {
+            index: 0,
+            message: format!(
+                "Invalid tag timestamp at index 1: Expected a timestamp later than {:?}",
+                Duration::from_secs(1)
+            )
+        })
+    );
+    assert_eq!(lyrics, expected);
+
+    assert_eq!(
+        lyrics.lines(&[
+            LineTag {
+                timestamp: Duration::from_secs(1),
+                segments: vec![SegmentTag {
+                    timestamp: Duration::from_secs(1),
+                    content: String::new()
+                },]
+            },
+            LineTag {
+                timestamp: Duration::from_secs(1),
+                segments: Vec::new()
+            }
+        ]),
+        Err(Error::InvalidTagOrder {
+            index: 1,
+            message: format!(
+                "Expected a timestamp later than {:?}",
+                Duration::from_secs(1)
+            )
+        })
     );
 }
