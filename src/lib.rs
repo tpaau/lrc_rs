@@ -71,9 +71,17 @@ pub enum Error {
     ///
     /// Remove the broken tag.
     #[cfg(feature = "parser")]
-    UnknownKey { key: String },
-    /// Tag timestamps had invalid order.
-    InvalidTagOrder { index: usize, message: String },
+    UnknownKey {
+        /// The key that wasn't recognized by the parser.
+        key: String,
+    },
+    /// Tag timestamps were not ordered correctly.
+    InvalidTagOrder {
+        /// The index pointing at an element in the input at which the order breaks.
+        index: usize,
+        /// Message specifying the expected value.
+        message: String,
+    },
     /// Parsing failed due to a syntax error.
     #[cfg(feature = "parser")]
     Nom {
@@ -121,7 +129,7 @@ pub trait LyricsAccess: Sized {
     /// Returns lyrics content active at the timestamp or [`None`] if there is no content for the
     /// given timestamp.
     fn lyrics_at(&self, timestamp: Duration) -> Option<&str>;
-    /// Check if timed tag timestamps are ordered in ascending order.
+    /// Checks if timed tag timestamps are ordered correctly.
     ///
     /// The first [segment tag](SegmentTag) may have the same timestamp as its [line](LineTag).
     fn check_timestamp_order<'a>(&'a self) -> Result<(), Error>;
@@ -173,25 +181,17 @@ impl SegmentTag {
 }
 
 /// A single line in the [synced lyrics](SyncedLyrics).
-///
-/// With regular LRC files, this will contain at most one element. If the enhanced LRC format is
-/// used, it may contain more elements.
-///
-/// You can check if the enhanced LRC format is in use with the
-/// [`is_enhanced_lrc`](SyncedLyrics::is_enhanced_lrc) method.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct LineTag {
     /// The timestamp at which the line starts.
     ///
-    /// Can be the same as or earlier than the timestamp of first segment.
+    /// Can be the same as or earlier than the timestamp of first segment (if the A2 extension is
+    /// used).
     pub timestamp: Duration,
     /// Timestamped segments of the line.
     ///
-    /// With the A2 extension, the first segment may have a timestamp that is later than the line
-    /// timestamp.
-    ///
-    /// With regular LRC, the timestamp of the first segment will always be the same as the line
-    /// timestamp.
+    /// With regular LRC files, this will contain at most one element. If the enhanced LRC format is
+    /// used, it may contain more elements.
     pub segments: Vec<SegmentTag>,
 }
 
@@ -294,6 +294,31 @@ impl LineTag {
         }
     }
 
+    /// Create a new line tag with a single segment with the same timestamp.
+    ///
+    /// # Examples
+    /// ```rust
+    /// # use std::time::Duration;
+    /// # use lrc_rs::{LineTag, SegmentTag};
+    /// assert_eq!(
+    ///     LineTag::new(Duration::from_secs(1), "La la la".to_string()),
+    ///     // You can save a lot of boilerplate code
+    ///     LineTag {
+    ///         timestamp: Duration::from_secs(1),
+    ///         segments: vec![SegmentTag {
+    ///             timestamp: Duration::from_secs(1),
+    ///             content: "La la la".to_string()
+    ///         }]
+    ///     }
+    /// );
+    /// ```
+    pub fn new(timestamp: Duration, content: String) -> Self {
+        Self {
+            timestamp,
+            segments: vec![SegmentTag { timestamp, content }],
+        }
+    }
+
     /// Set the timestamp of the line.
     pub fn timestamp(&mut self, timestamp: Duration) -> &mut Self {
         self.timestamp = timestamp;
@@ -301,10 +326,19 @@ impl LineTag {
     }
 
     /// Add a segment to the line.
+    ///
+    /// Prefer using this method over manually adding segments to lines as it ensures that the
+    /// timestamp order stays correct. If you need to add segments manually, use the
+    /// [`check_timestamp_order`](Self::check_timestamp_order) method to verify timestamp order.
     pub fn segment<'a>(&'a mut self, segment: SegmentTag) -> Result<&'a mut Self, Error> {
         self.segments(&[segment])
     }
 
+    /// Add multiple segments to the line.
+    ///
+    /// Prefer using this method over manually adding segments to lines as it ensures that the
+    /// timestamp order stays correct. If you need to add segments manually, use the
+    /// [`check_timestamp_order`](Self::check_timestamp_order) method to verify timestamp order.
     pub fn segments<'a>(&'a mut self, segments: &[SegmentTag]) -> Result<&'a mut Self, Error> {
         if segments.is_empty() {
             Ok(self)
@@ -359,11 +393,13 @@ pub struct LRCTool {
 }
 
 impl LRCTool {
+    /// Set the name of the program.
     pub fn name(&mut self, name: String) -> &mut Self {
         self.name = name;
         self
     }
 
+    /// Set the version of the program.
     pub fn version(&mut self, version: Option<String>) -> &mut Self {
         self.version = version;
         self
@@ -463,61 +499,104 @@ impl SyncedLyrics {
         }
     }
 
-    // DOCS: Document this
+    fn serialize_id_tag(key: &str, value: &str, newline: bool) -> String {
+        if newline {
+            format!("\n[{key}:{value}]")
+        } else {
+            format!("[{key}:{value}]")
+        }
+    }
+
+    fn format_duration_mm_ss(dur: Duration) -> String {
+        let secs = dur.as_secs();
+        let mins = secs / 60;
+        let secs = secs - mins * 60;
+        format!("{mins}:{secs}")
+    }
+
+    // /// Comments found in the lyrics.
+    // pub comments: Vec<String>,
+    // /// LRC segments grouped by lines.
+    // pub lines: Vec<LineTag>,
+
+    /// Set the title of the song.
     pub fn title(&mut self, title: Option<String>) -> &mut Self {
         self.title = title;
         self
     }
 
+    /// Set the artist performing the song.
     pub fn artist(&mut self, artist: Option<String>) -> &mut Self {
         self.artist = artist;
         self
     }
 
+    /// Set the album the song is from.
     pub fn album(&mut self, album: Option<String>) -> &mut Self {
         self.album = album;
         self
     }
 
+    /// Set the author of the song.
     pub fn author(&mut self, author: Option<String>) -> &mut Self {
         self.author = author;
         self
     }
 
+    /// Set the lyricist of the song.
     pub fn lyricist(&mut self, lyricist: Option<String>) -> &mut Self {
         self.lyricist = lyricist;
         self
     }
 
+    /// Set the length of the song.
     pub fn length(&mut self, length: Option<Duration>) -> &mut Self {
         self.length = length;
         self
     }
 
+    /// Set the author of the LRC file (not the song).
     pub fn file_author(&mut self, file_author: Option<String>) -> &mut Self {
         self.file_author = file_author;
         self
     }
 
+    /// Set the info on the player or editor that created the LRC file.
     pub fn tool(&mut self, tool: Option<LRCTool>) -> &mut Self {
         self.tool = tool;
         self
     }
 
+    /// Add a comment to the lyrics.
+    ///
+    /// **NOTE**: In serialized content, comments will be put between ID tags and timed tags.
     pub fn comment(&mut self, comment: String) -> &mut Self {
         self.comments.push(comment);
         self
     }
 
+    /// Add multiple comments to the lyrics.
+    ///
+    /// **NOTE**: In serialized content, comments will be put between ID tags and timed tags.
     pub fn comments(&mut self, comments: &[String]) -> &mut Self {
         self.comments.extend_from_slice(comments);
         self
     }
 
+    /// Add a line to the lyrics.
+    ///
+    /// Prefer using this method over manually adding lines to lyrics as it ensures that the
+    /// timestamp order stays correct. If you need to add lines manually, use the
+    /// [`check_timestamp_order`](Self::check_timestamp_order) method to verify timestamp order.
     pub fn line(&mut self, line: LineTag) -> Result<&mut Self, Error> {
         self.lines(&[line])
     }
 
+    /// Add multiple lines to the lyrics.
+    ///
+    /// Prefer using this method over manually adding lines to lyrics as it ensures that the
+    /// timestamp order stays correct. If you need to add lines manually, use the
+    /// [`check_timestamp_order`](Self::check_timestamp_order) method to verify timestamp order.
     pub fn lines(&mut self, lines: &[LineTag]) -> Result<&mut Self, Error> {
         if lines.is_empty() {
             return Ok(self);
@@ -556,7 +635,7 @@ impl SyncedLyrics {
         Ok(self)
     }
 
-    /// Create an empty synced lyrics struct with some line segments.
+    /// Create an empty synced lyrics struct with some timed tags.
     pub fn new_with_tags(tags: Vec<LineTag>) -> Self {
         Self {
             title: None,
@@ -575,13 +654,11 @@ impl SyncedLyrics {
     /// Checks if the lyrics contain any tags from the A2 extension.
     ///
     /// If the enhanced LRC format is used, [line tags](LineTag) may contain more than one segment,
-    /// and the first [segments](SegmentTag) in [line tags](LineTag) may have a timestamp that is
+    /// and the first [segment](SegmentTag) in [line tags](LineTag) may have a timestamp that is
     /// later than the line timestamp.
     pub fn is_enhanced_lrc(&self) -> bool {
         for line in &self.lines {
             if line.segments.is_empty() {
-                #[cfg(feature = "log")]
-                warn!("Line segments list is empty, skipping");
                 continue;
             } else if line.segments.len() > 1 || line.timestamp < line.segments[0].timestamp {
                 return true;
@@ -590,26 +667,11 @@ impl SyncedLyrics {
         false
     }
 
-    fn serialize_id_tag(key: &str, value: &str, newline: bool) -> String {
-        if newline {
-            format!("\n[{key}:{value}]")
-        } else {
-            format!("[{key}:{value}]")
-        }
-    }
-
-    fn format_duration_mm_ss(dur: Duration) -> String {
-        let secs = dur.as_secs();
-        let mins = secs / 60;
-        let secs = secs - mins * 60;
-        format!("{mins}:{secs}")
-    }
-
     /// Serialize the struct to LRC format.
     ///
-    /// **NOTE**: This function may not always produce the same output as the input parsed to create
-    /// the [`SyncedLyrics`] data structure. For instance, the original placement of ID tags and
-    /// comments is not retained, and the offset tag is omitted as it is applied by the parser.
+    /// **NOTE**: This method may not always produce the same output as the input parsed to create
+    /// the data structure. For instance, the original placement of ID tags and comments is not
+    /// preserved, and the offset tag is omitted as it is applied by the parser.
     #[cfg_attr(
         feature = "parser",
         doc = r#"
@@ -692,6 +754,41 @@ assert_eq!(parsed.serialize(), parsed_twice);
     }
 
     /// Parses LRC lyrics data.
+    ///
+    /// # Examples
+    /// Parse some lyrics
+    /// ```rust
+    /// # use lrc_rs::SyncedLyrics;
+    /// let content = "[ti:My awesome song]
+    /// [00:02.50] La la la
+    /// [00:05.10] <00:05.10> La la la <00:06.30> la la la";
+    /// let lyrics = SyncedLyrics::parse(content).unwrap();
+    /// ```
+    ///
+    /// Parser fails to parse content with an invalid ID tag
+    /// ```rust
+    /// # use lrc_rs::{SyncedLyrics, Error};
+    /// let content = "[fun:I am an invalid ID tag]";
+    /// assert_eq!(
+    ///     SyncedLyrics::parse(content),
+    ///     Err(Error::UnknownKey { key: "fun".to_string() })
+    /// );
+    /// ```
+    ///
+    /// Parser fails to parse content with invalid timestamp order
+    /// ```rust
+    /// # use std::time::Duration;
+    /// # use lrc_rs::{SyncedLyrics, Error};
+    /// let content = "[00:02.10] First line
+    /// [00:01.90] My timestamp is wrong!";
+    /// assert_eq!(
+    ///     SyncedLyrics::parse(content),
+    ///     Err(Error::InvalidTagOrder {
+    ///         index: 1,
+    ///         message: format!("Expected a timestamp later than {:?}", Duration::from_secs_f32(2.1))
+    ///     })
+    /// );
+    /// ```
     #[cfg(feature = "parser")]
     pub fn parse<'a>(input: &'a str) -> Result<Self, Error> {
         match parser::parse(input) {
