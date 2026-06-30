@@ -1,0 +1,19 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Log in to crates.io
+        env:
+          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+        run: echo "$PUBLISH_TOKEN" | cargo login
+      - name: Publish with Cargo
+        run: cargo publish
