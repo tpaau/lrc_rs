@@ -91,9 +91,12 @@ lyrics.line(
 assert_eq!(
     lyrics.line(LineTag::default()),
     Err(
-        lrc_rs::Error::InvalidTagOrder {
+        lrc_rs::Error::InvalidTimestampOrder {
             index: 0,
-            message: format!("Expected a timestamp later than {:?}", Duration::from_secs_f32(5.3))
+            message: format!(
+                "Expected a timestamp later than {:?}",
+                Duration::from_secs_f32(5.3)
+            )
         }
     )
 );
