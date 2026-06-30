@@ -11,6 +11,8 @@ use std::time::Duration;
 use nom::Finish;
 #[cfg(feature = "parser")]
 pub use nom::error::ErrorKind;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "log")]
 use log::warn;
@@ -59,6 +61,7 @@ fn duration_to_a2_timestamp(dur: Duration) -> String {
 }
 
 /// Error indicating why lyrics couldn't be parsed as LRC.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Error {
     /// An overflow occurred while offsetting timestamps with the value of the LRC `offset` tag
@@ -205,6 +208,7 @@ pub trait LyricsAccess: Sized {
 }
 
 /// Segment of lyrics in a [single line](LineTag), associated with a timestamp.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct SegmentTag {
     /// The timestamp at which the segment starts.
@@ -255,6 +259,7 @@ impl SegmentTag {
 }
 
 /// A single line in the [synced lyrics](SyncedLyrics).
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct LineTag {
     /// The timestamp at which the line starts.
@@ -469,6 +474,7 @@ impl LineTag {
 }
 
 /// Info on the player or editor that created the LRC file.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct LRCTool {
     /// Name of the program.
@@ -492,6 +498,7 @@ impl LRCTool {
 }
 
 /// Lyrics grouped into timestamped segments with additional metadata.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct SyncedLyrics {
     /// Title of the song.
