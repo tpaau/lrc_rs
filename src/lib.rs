@@ -1067,6 +1067,7 @@ assert_eq!(parsed.serialize(), parsed_twice);
                         "re" | "tool" => tool_name = Some(tag.value.to_string()),
                         "ve" => tool_version = Some(tag.value.to_string()),
                         _ => {
+                            #[cfg(feature = "log")]
                             warn!("Unknown ID tag key \"{}\"", tag.key);
                             return Err(Error::UnknownKey {
                                 key: tag.key.to_string(),
