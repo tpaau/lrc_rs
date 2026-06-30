@@ -150,7 +150,7 @@ pub(crate) fn parse<'a>(i: &'a str) -> Result<Vec<Line<'a>>, nom::error::Error<&
                 ))),
             ),
             |(mut a, b)| {
-                a.extend(b.into_iter());
+                a.extend(b);
                 a
             },
         ),

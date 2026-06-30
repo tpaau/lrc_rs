@@ -221,7 +221,7 @@ fn serialize() {
     #[cfg(feature = "parser")]
     {
         let input = include_str!("../assets/example.lrc");
-        let parsed = SyncedLyrics::parse(&input).unwrap();
+        let parsed = SyncedLyrics::parse(input).unwrap();
         let parsed_twice = SyncedLyrics::parse(&parsed.clone().serialize())
             .unwrap()
             .serialize();

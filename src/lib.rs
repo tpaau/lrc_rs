@@ -9,8 +9,6 @@ use std::time::Duration;
 
 #[cfg(feature = "parser")]
 use nom::Finish;
-#[cfg(feature = "parser")]
-pub use nom::error::ErrorKind;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -60,6 +58,135 @@ fn duration_to_a2_timestamp(dur: Duration) -> String {
     format!("<{}>", duration_to_timestamp(dur))
 }
 
+#[cfg(feature = "parser")]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum ErrorKind {
+    Tag,
+    MapRes,
+    MapOpt,
+    Alt,
+    IsNot,
+    IsA,
+    SeparatedList,
+    SeparatedNonEmptyList,
+    Many0,
+    Many1,
+    ManyTill,
+    Count,
+    TakeUntil,
+    LengthValue,
+    TagClosure,
+    Alpha,
+    Digit,
+    HexDigit,
+    OctDigit,
+    BinDigit,
+    AlphaNumeric,
+    Space,
+    MultiSpace,
+    LengthValueFn,
+    Eof,
+    Switch,
+    TagBits,
+    OneOf,
+    NoneOf,
+    Char,
+    CrLf,
+    RegexpMatch,
+    RegexpMatches,
+    RegexpFind,
+    RegexpCapture,
+    RegexpCaptures,
+    TakeWhile1,
+    Complete,
+    Fix,
+    Escaped,
+    EscapedTransform,
+    NonEmpty,
+    ManyMN,
+    Not,
+    Permutation,
+    Verify,
+    TakeTill1,
+    TakeWhileMN,
+    TooLarge,
+    Many0Count,
+    Many1Count,
+    Float,
+    Satisfy,
+    Fail,
+    Many,
+    Fold,
+    Precedence,
+}
+
+#[doc(hidden)]
+#[cfg(feature = "parser")]
+impl From<nom::error::ErrorKind> for ErrorKind {
+    fn from(value: nom::error::ErrorKind) -> Self {
+        match value {
+            nom::error::ErrorKind::Tag => Self::Tag,
+            nom::error::ErrorKind::MapRes => Self::MapRes,
+            nom::error::ErrorKind::MapOpt => Self::MapOpt,
+            nom::error::ErrorKind::Alt => Self::Alt,
+            nom::error::ErrorKind::IsNot => Self::IsNot,
+            nom::error::ErrorKind::IsA => Self::IsA,
+            nom::error::ErrorKind::SeparatedList => Self::SeparatedList,
+            nom::error::ErrorKind::SeparatedNonEmptyList => Self::SeparatedNonEmptyList,
+            nom::error::ErrorKind::Many0 => Self::Many0,
+            nom::error::ErrorKind::Many1 => Self::Many1,
+            nom::error::ErrorKind::ManyTill => Self::ManyTill,
+            nom::error::ErrorKind::Count => Self::Count,
+            nom::error::ErrorKind::TakeUntil => Self::TakeUntil,
+            nom::error::ErrorKind::LengthValue => Self::LengthValue,
+            nom::error::ErrorKind::TagClosure => Self::TagClosure,
+            nom::error::ErrorKind::Alpha => Self::Alpha,
+            nom::error::ErrorKind::Digit => Self::Digit,
+            nom::error::ErrorKind::HexDigit => Self::HexDigit,
+            nom::error::ErrorKind::OctDigit => Self::OctDigit,
+            nom::error::ErrorKind::BinDigit => Self::BinDigit,
+            nom::error::ErrorKind::AlphaNumeric => Self::AlphaNumeric,
+            nom::error::ErrorKind::Space => Self::Space,
+            nom::error::ErrorKind::MultiSpace => Self::MultiSpace,
+            nom::error::ErrorKind::LengthValueFn => Self::LengthValueFn,
+            nom::error::ErrorKind::Eof => Self::Eof,
+            nom::error::ErrorKind::Switch => Self::Switch,
+            nom::error::ErrorKind::TagBits => Self::TagBits,
+            nom::error::ErrorKind::OneOf => Self::OneOf,
+            nom::error::ErrorKind::NoneOf => Self::NoneOf,
+            nom::error::ErrorKind::Char => Self::Char,
+            nom::error::ErrorKind::CrLf => Self::CrLf,
+            nom::error::ErrorKind::RegexpMatch => Self::RegexpMatch,
+            nom::error::ErrorKind::RegexpMatches => Self::RegexpMatches,
+            nom::error::ErrorKind::RegexpFind => Self::RegexpFind,
+            nom::error::ErrorKind::RegexpCapture => Self::RegexpCapture,
+            nom::error::ErrorKind::RegexpCaptures => Self::RegexpCaptures,
+            nom::error::ErrorKind::TakeWhile1 => Self::TakeWhile1,
+            nom::error::ErrorKind::Complete => Self::Complete,
+            nom::error::ErrorKind::Fix => Self::Fix,
+            nom::error::ErrorKind::Escaped => Self::Escaped,
+            nom::error::ErrorKind::EscapedTransform => Self::EscapedTransform,
+            nom::error::ErrorKind::NonEmpty => Self::NonEmpty,
+            nom::error::ErrorKind::ManyMN => Self::ManyMN,
+            nom::error::ErrorKind::Not => Self::Not,
+            nom::error::ErrorKind::Permutation => Self::Permutation,
+            nom::error::ErrorKind::Verify => Self::Verify,
+            nom::error::ErrorKind::TakeTill1 => Self::TakeTill1,
+            nom::error::ErrorKind::TakeWhileMN => Self::TakeWhileMN,
+            nom::error::ErrorKind::TooLarge => Self::TooLarge,
+            nom::error::ErrorKind::Many0Count => Self::Many0Count,
+            nom::error::ErrorKind::Many1Count => Self::Many1Count,
+            nom::error::ErrorKind::Float => Self::Float,
+            nom::error::ErrorKind::Satisfy => Self::Satisfy,
+            nom::error::ErrorKind::Fail => Self::Fail,
+            nom::error::ErrorKind::Many => Self::Many,
+            nom::error::ErrorKind::Fold => Self::Fold,
+            nom::error::ErrorKind::Precedence => Self::Precedence,
+        }
+    }
+}
+
 /// Error indicating why lyrics couldn't be parsed as LRC.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -91,7 +218,7 @@ pub enum Error {
         /// The input for which the error occurred.
         input: String,
         /// The error code.
-        error: nom::error::ErrorKind,
+        error: ErrorKind,
     },
 }
 
@@ -101,7 +228,7 @@ impl From<nom::error::Error<&str>> for Error {
     fn from(value: nom::error::Error<&str>) -> Self {
         Self::Nom {
             input: value.input.to_string(),
-            error: value.code,
+            error: value.code.into(),
         }
     }
 }
@@ -291,9 +418,7 @@ impl LyricsAccess for LineTag {
     }
 
     fn active_tag(&self, timestamp: Duration) -> Option<usize> {
-        if self.segments.is_empty() {
-            None
-        } else if timestamp < self.timestamp {
+        if self.segments.is_empty() || timestamp < self.timestamp {
             None
         } else {
             for (i, segment) in self.segments.iter().rev().enumerate() {
@@ -420,7 +545,7 @@ impl LineTag {
     /// Prefer using this method over manually adding segments to lines as it ensures that the
     /// timestamp order stays correct. If you need to add segments manually, use the
     /// [`check_timestamp_order`](Self::check_timestamp_order) method to verify the timestamp order.
-    pub fn segment<'a>(&'a mut self, segment: SegmentTag) -> Result<&'a mut Self, Error> {
+    pub fn segment(&mut self, segment: SegmentTag) -> Result<&mut Self, Error> {
         self.segments(&[segment])
     }
 
@@ -429,7 +554,7 @@ impl LineTag {
     /// Prefer using this method over manually adding segments to lines as it ensures that the
     /// timestamp order stays correct. If you need to add segments manually, use the
     /// [`check_timestamp_order`](Self::check_timestamp_order) method to verify the timestamp order.
-    pub fn segments<'a>(&'a mut self, segments: &[SegmentTag]) -> Result<&'a mut Self, Error> {
+    pub fn segments(&mut self, segments: &[SegmentTag]) -> Result<&mut Self, Error> {
         if segments.is_empty() {
             Ok(self)
         } else if self.segments.is_empty() {
@@ -544,7 +669,7 @@ impl LyricsAccess for SyncedLyrics {
 
     fn check_timestamp_order(&self) -> Result<(), Error> {
         if self.lines.is_empty() {
-            return Ok(());
+            Ok(())
         } else {
             if let Err(e) = self.lines[0].check_timestamp_order() {
                 return Err(Error::InvalidTimestampOrder {
@@ -988,13 +1113,13 @@ assert_eq!(parsed.serialize(), parsed_twice);
                             message: format!("{e}"),
                         });
                     }
-                    if let Some(ts) = timestamp {
-                        if line.last_timestamp() <= ts {
-                            return Err(Error::InvalidTimestampOrder {
-                                index: i,
-                                message: format!("Expected a timestamp later than {ts:?}"),
-                            });
-                        }
+                    if let Some(ts) = timestamp
+                        && line.last_timestamp() <= ts
+                    {
+                        return Err(Error::InvalidTimestampOrder {
+                            index: i,
+                            message: format!("Expected a timestamp later than {ts:?}"),
+                        });
                     }
                     timestamp = Some(line.last_timestamp())
                 }
