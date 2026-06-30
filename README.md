@@ -102,7 +102,7 @@ assert_eq!(
 Access lyrics data at a specific timestamp
 ```rust
 # use std::time::Duration;
-# use lrc_rs::{SyncedLyrics, LineTag};
+# use lrc_rs::{SyncedLyrics, LineTag, SegmentTag};
 // Needed for `active_tag`
 use lrc_rs::LyricsAccess;
 
@@ -112,7 +112,7 @@ let lyrics = SyncedLyrics::new(vec![
     LineTag::new(Duration::from_secs_f32(5.3), "Third line".to_string()),
 ]);
 
-// For the `SyncedLyrics` struct, the `active_tag` returns an index to the active line
+// For `SyncedLyrics`, the `active_tag` returns an index to the active line
 assert_eq!(lyrics.active_tag(Duration::default()), None);
 assert_eq!(lyrics.active_tag(Duration::from_secs(1)), Some(0));
 assert_eq!(lyrics.active_tag(Duration::from_secs(4)), Some(1));
@@ -128,4 +128,31 @@ let lyrics = SyncedLyrics::new(vec![
 
 let index = lyrics.active_tag(Duration::from_secs(3)).unwrap();
 assert_eq!(lyrics.lines[index].active_tag(Duration::from_secs(3)), None);
+
+let line = LineTag {
+    timestamp: Duration::default(),
+    segments: vec![
+        SegmentTag::new(Duration::from_secs(1), "First".to_string()),
+        SegmentTag::new(Duration::from_secs(2), "Second".to_string()),
+        SegmentTag::new(Duration::from_secs(4), "Third".to_string()),
+    ]
+};
+
+/// For `LineTag`, the `active_tag` returns an index to a segment in the line
+assert_eq!(line.active_tag(Duration::default()), None);
+assert_eq!(line.active_tag(Duration::from_secs_f32(0.5)), None);
+assert_eq!(line.active_tag(Duration::from_secs(1)), Some(0));
+assert_eq!(line.active_tag(Duration::from_secs(2)), Some(1));
+assert_eq!(line.active_tag(Duration::from_secs(3)), Some(1));
+assert_eq!(line.active_tag(Duration::from_secs(4)), Some(2));
+assert_eq!(line.active_tag(Duration::from_secs(u64::MAX)), Some(2));
+
+assert_eq!(
+    line.segments[line.active_tag(Duration::from_secs_f32(1.1)).unwrap()].content,
+    "First".to_string()
+);
+assert_eq!(
+    line.segments[line.active_tag(Duration::from_secs_f32(2.3)).unwrap()].content,
+    "Second".to_string()
+);
 ```

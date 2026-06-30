@@ -165,6 +165,11 @@ impl SegmentTag {
         }
     }
 
+    /// Create a new segment tag.
+    pub fn new(timestamp: Duration, content: String) -> Self {
+        Self { timestamp, content }
+    }
+
     /// Checks if the segment is active at the given timestamp.
     pub fn is_active(&self, timestamp: Duration) -> bool {
         self.timestamp <= timestamp
