@@ -30,7 +30,7 @@ Convert synced lyrics to unsynced lyrics
 ```rust
 # use std::time::Duration;
 # use lrc_rs::{SyncedLyrics, LineTag, SegmentTag};
-// Needed for the `to_unsynced` method
+// Needed for `to_unsynced`
 use lrc_rs::LyricsAccess;
 
 let lyrics = SyncedLyrics {
@@ -100,6 +100,32 @@ assert_eq!(
 ```
 
 Access lyrics data at a specific timestamp
-```ignore
-TBD
+```rust
+# use std::time::Duration;
+# use lrc_rs::{SyncedLyrics, LineTag};
+// Needed for `active_tag`
+use lrc_rs::LyricsAccess;
+
+let lyrics = SyncedLyrics::new(vec![
+    LineTag::new(Duration::from_secs(1), "First line".to_string()),
+    LineTag::new(Duration::from_secs_f32(3.1), "Second line".to_string()),
+    LineTag::new(Duration::from_secs_f32(5.3), "Third line".to_string()),
+]);
+
+// For the `SyncedLyrics` struct, the `active_tag` returns an index to the active line
+assert_eq!(lyrics.active_tag(Duration::default()), None);
+assert_eq!(lyrics.active_tag(Duration::from_secs(1)), Some(0));
+assert_eq!(lyrics.active_tag(Duration::from_secs(4)), Some(1));
+assert_eq!(lyrics.active_tag(Duration::from_secs(u64::MAX)), Some(2));
+
+let lyrics = SyncedLyrics::new(vec![
+    LineTag::new(Duration::from_secs_f32(1.2), "Hello".to_string()),
+    // Lines don't have to contain any segments, in which case there is no active lyrics data until
+    // the next line
+    LineTag { timestamp: Duration::from_secs(2), segments: Vec::new() },
+    LineTag::new(Duration::from_secs_f32(4.1), "World!".to_string()),
+]);
+
+let index = lyrics.active_tag(Duration::from_secs(3)).unwrap();
+assert_eq!(lyrics.lines[index].active_tag(Duration::from_secs(3)), None);
 ```

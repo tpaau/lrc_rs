@@ -300,12 +300,12 @@ fn line_tag_check_timestamp_order() {
 fn synced_lyrics_check_timestamp_order() {
     assert!(SyncedLyrics::default().check_timestamp_order().is_ok());
     assert!(
-        SyncedLyrics::new_with_tags(vec![LineTag::default()])
+        SyncedLyrics::new(vec![LineTag::default()])
             .check_timestamp_order()
             .is_ok()
     );
     assert!(
-        SyncedLyrics::new_with_tags(vec![
+        SyncedLyrics::new(vec![
             LineTag {
                 timestamp: Duration::from_secs(5),
                 segments: Vec::new()
@@ -319,7 +319,7 @@ fn synced_lyrics_check_timestamp_order() {
         .is_ok()
     );
     assert!(
-        SyncedLyrics::new_with_tags(vec![
+        SyncedLyrics::new(vec![
             LineTag {
                 timestamp: Duration::from_secs(5),
                 segments: vec![
@@ -355,7 +355,7 @@ fn synced_lyrics_check_timestamp_order() {
         .is_ok()
     );
     assert_eq!(
-        SyncedLyrics::new_with_tags(vec![
+        SyncedLyrics::new(vec![
             LineTag {
                 timestamp: Duration::from_secs(5),
                 segments: vec![SegmentTag {
@@ -770,4 +770,66 @@ fn synced_lyrics_add_lines() {
             )
         })
     );
+}
+
+#[test]
+fn line_tag_lyrics_at() {
+    let line = LineTag {
+        timestamp: Duration::from_secs(1),
+        segments: vec![
+            SegmentTag {
+                timestamp: Duration::from_secs(2),
+                content: String::new(),
+            },
+            SegmentTag {
+                timestamp: Duration::from_secs(3),
+                content: String::new(),
+            },
+        ],
+    };
+    assert_eq!(line.active_tag(Duration::default()), None);
+    assert_eq!(line.active_tag(Duration::from_secs(1)), None);
+    assert_eq!(line.active_tag(Duration::from_secs_f32(1.5)), None);
+    assert_eq!(line.active_tag(Duration::from_secs(2)), Some(0));
+    assert_eq!(line.active_tag(Duration::from_secs_f32(2.5)), Some(0));
+    assert_eq!(line.active_tag(Duration::from_secs(3)), Some(1));
+    assert_eq!(line.active_tag(Duration::from_secs(u64::MAX)), Some(1));
+
+    let line = LineTag {
+        timestamp: Duration::from_secs(1),
+        segments: vec![SegmentTag {
+            timestamp: Duration::from_secs(1),
+            content: String::new(),
+        }],
+    };
+    assert_eq!(line.active_tag(Duration::default()), None);
+    assert_eq!(line.active_tag(Duration::from_secs(1)), Some(0));
+}
+
+#[test]
+fn synced_lyrics_lyrics_at() {
+    let lyrics = SyncedLyrics::new(vec![
+        LineTag::new(Duration::from_secs(1), String::new()),
+        LineTag::new(Duration::from_secs(3), String::new()),
+        LineTag::new(Duration::from_secs(7), String::new()),
+    ]);
+    assert_eq!(lyrics.active_tag(Duration::default()), None);
+    assert_eq!(lyrics.active_tag(Duration::from_secs_f32(0.5)), None);
+    assert_eq!(lyrics.active_tag(Duration::from_secs(1)), Some(0));
+    assert_eq!(lyrics.active_tag(Duration::from_secs(2)), Some(0));
+    assert_eq!(lyrics.active_tag(Duration::from_secs(3)), Some(1));
+    assert_eq!(lyrics.active_tag(Duration::from_secs(6)), Some(1));
+    assert_eq!(lyrics.active_tag(Duration::from_secs(7)), Some(2));
+    assert_eq!(lyrics.active_tag(Duration::from_secs(u64::MAX)), Some(2));
+
+    let lyrics = SyncedLyrics::new(vec![
+        LineTag::new(Duration::from_secs_f32(1.2), String::new()),
+        LineTag {
+            timestamp: Duration::from_secs(2),
+            segments: Vec::new(),
+        },
+        LineTag::new(Duration::from_secs_f32(4.1), String::new()),
+    ]);
+
+    assert_eq!(lyrics.active_tag(Duration::from_secs(3)), Some(1));
 }

@@ -126,9 +126,12 @@ impl std::fmt::Display for Error {
 pub trait LyricsAccess: Sized {
     /// Returns unsynced lyrics without timestamps or additional metadata.
     fn to_unsynced(self) -> String;
-    /// Returns lyrics content active at the timestamp or [`None`] if there is no content for the
-    /// given timestamp.
-    fn lyrics_at(&self, timestamp: Duration) -> Option<&str>;
+    /// Returns the index of the active tag or [`None`] if no tag is active for the given
+    /// timestamp.
+    ///
+    /// **WARNING**: This function might return wrong results if the segment timestamp order is nor
+    /// correct.
+    fn active_tag(&self, timestamp: Duration) -> Option<usize>;
     /// Checks if timed tag timestamps are ordered correctly.
     ///
     /// The first [segment tag](SegmentTag) may have the same timestamp as its [line](LineTag).
@@ -164,7 +167,7 @@ impl SegmentTag {
 
     /// Checks if the segment is active at the given timestamp.
     pub fn is_active(&self, timestamp: Duration) -> bool {
-        self.timestamp >= timestamp
+        self.timestamp <= timestamp
     }
 
     /// Set the timestamp of the segment.
@@ -211,8 +214,19 @@ impl LyricsAccess for LineTag {
         segments.join("")
     }
 
-    fn lyrics_at(&self, timestamp: Duration) -> Option<&str> {
-        todo!()
+    fn active_tag(&self, timestamp: Duration) -> Option<usize> {
+        if self.segments.is_empty() {
+            None
+        } else if timestamp < self.timestamp {
+            None
+        } else {
+            for (i, segment) in self.segments.iter().rev().enumerate() {
+                if segment.is_active(timestamp) {
+                    return Some(self.segments.len() - 1 - i);
+                }
+            }
+            None
+        }
     }
 
     // NOTE: If a line has only one segment, its timestamp doesn't have to be the same as the
@@ -437,8 +451,17 @@ impl LyricsAccess for SyncedLyrics {
         lines.join("\n")
     }
 
-    fn lyrics_at(&self, timestamp: Duration) -> Option<&str> {
-        todo!()
+    fn active_tag(&self, timestamp: Duration) -> Option<usize> {
+        if self.lines.is_empty() {
+            None
+        } else {
+            for (i, line) in self.lines.iter().rev().enumerate() {
+                if line.timestamp <= timestamp {
+                    return Some(self.lines.len() - 1 - i);
+                }
+            }
+            None
+        }
     }
 
     fn check_timestamp_order<'a>(&'a self) -> Result<(), Error> {
@@ -636,7 +659,7 @@ impl SyncedLyrics {
     }
 
     /// Create an empty synced lyrics struct with some timed tags.
-    pub fn new_with_tags(tags: Vec<LineTag>) -> Self {
+    pub fn new(tags: Vec<LineTag>) -> Self {
         Self {
             title: None,
             artist: None,
