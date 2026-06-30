@@ -3,7 +3,14 @@ name = "lrc_rs"
 version = "0.1.0"
 edition = "2024"
 authors = [ "tpaau <tpaau-17db@tutamail.com>" ]
+description = "Robust crate for working with synced lyrics content in the LRC format with support for the A2 extension"
 license = "MIT"
+repository = "https://github.com/tpaau/lrc_rs"
+categories = ["encoding", "parser-implementations"]
+keywords = ["parser", "parsing", "serialization", "time", "music"]
+readme = "https://github.com/tpaau/lrc_rs/blob/main/README.md"
+documentation = "https://tpaau.github.io/lrc_rs/lrc_rs/"
+homepage = "https://github.com/tpaau/lrc_rs"
 
 [dependencies]
 log = { version = "0.4.33", optional = true }

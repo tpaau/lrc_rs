@@ -92,6 +92,7 @@ pub enum Error {
     },
 }
 
+#[doc(hidden)]
 #[cfg(feature = "parser")]
 impl From<nom::error::Error<&str>> for Error {
     fn from(value: nom::error::Error<&str>) -> Self {
@@ -101,6 +102,8 @@ impl From<nom::error::Error<&str>> for Error {
         }
     }
 }
+
+impl std::error::Error for Error {}
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
