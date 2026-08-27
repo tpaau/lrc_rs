@@ -277,10 +277,11 @@ pub trait LyricsAccess: Sized {
     /// assert_eq!(lyrics.to_unsynced(), expected);
     /// ```
     fn to_unsynced(self) -> String;
+
     /// Returns the index of the active tag or [`None`] if no tag is active for the given
     /// timestamp.
     ///
-    /// **WARNING**: This function might return wrong results if the segment timestamp order is nor
+    /// **WARNING**: This function might return wrong results if the segment timestamp order is not
     /// correct.
     ///
     /// # Examples
@@ -302,6 +303,10 @@ pub trait LyricsAccess: Sized {
     /// assert_eq!(lyrics.active_tag(Duration::from_secs(u64::MAX)), Some(2));
     /// ```
     fn active_tag(&self, timestamp: Duration) -> Option<usize>;
+
+    /// Returns whether the element is active for the given timestamp.
+    fn is_active(&self, timestamp: Duration) -> bool;
+
     /// Checks if timed tag timestamps are ordered correctly.
     ///
     /// # Examples
@@ -430,6 +435,10 @@ impl LyricsAccess for LineTag {
         }
     }
 
+    fn is_active(&self, timestamp: Duration) -> bool {
+        self.timestamp <= timestamp
+    }
+
     // NOTE: If a line has only one segment, its timestamp doesn't have to be the same as the
     // timestamp of the line. The window between the line timestamp and the timestamp of the first
     // tag is when no segment is active. It does indicate that the A2 extension is active, though.
@@ -452,7 +461,7 @@ impl LyricsAccess for LineTag {
                 ts = &self.segments[0].timestamp;
             }
             for (i, segment) in self.segments[1..self.segments.len()].iter().enumerate() {
-                if segment.timestamp <= *ts {
+                if segment.is_active(*ts) {
                     return Err(Error::InvalidTimestampOrder {
                         index: i + 1,
                         message: format!("Expected a timestamp later than {ts:?}"),
@@ -506,6 +515,19 @@ impl LineTag {
                     .join("")
         } else {
             duration_to_standard_timestamp(self.timestamp)
+        }
+    }
+
+    pub fn current_segment(&self, timestamp: Duration) -> Option<&SegmentTag> {
+        if self.segments.is_empty() || timestamp < self.timestamp {
+            None
+        } else {
+            for segment in self.segments.iter().rev() {
+                if segment.is_active(timestamp) {
+                    return Some(segment);
+                }
+            }
+            None
         }
     }
 
@@ -569,7 +591,7 @@ impl LineTag {
             }
             let mut ts = &self.timestamp;
             for (i, segment) in segments[1..segments.len()].iter().enumerate() {
-                if segment.timestamp <= *ts {
+                if segment.is_active(*ts) {
                     return Err(Error::InvalidTimestampOrder {
                         index: i + 1,
                         message: format!("Expected a timestamp later than {ts:?}"),
@@ -583,7 +605,7 @@ impl LineTag {
         } else {
             let mut ts = self.last_timestamp();
             for (i, segment) in segments.iter().enumerate() {
-                if segment.timestamp <= *ts {
+                if segment.is_active(*ts) {
                     return Err(Error::InvalidTimestampOrder {
                         index: i,
                         message: format!("Expected a timestamp later than {ts:?}"),
@@ -659,12 +681,19 @@ impl LyricsAccess for SyncedLyrics {
             None
         } else {
             for (i, line) in self.lines.iter().rev().enumerate() {
-                if line.timestamp <= timestamp {
+                if line.is_active(timestamp) {
                     return Some(self.lines.len() - 1 - i);
                 }
             }
             None
         }
+    }
+
+    fn is_active(&self, timestamp: Duration) -> bool {
+        self.lines
+            .get(0)
+            .map(|l| l.is_active(timestamp))
+            .unwrap_or_default()
     }
 
     fn check_timestamp_order(&self) -> Result<(), Error> {
@@ -684,7 +713,7 @@ impl LyricsAccess for SyncedLyrics {
                         index: i + 1,
                         message: format!("{e}"),
                     });
-                } else if line.timestamp <= *ts {
+                } else if line.is_active(*ts) {
                     return Err(Error::InvalidTimestampOrder {
                         index: i + 1,
                         message: format!("Expected a timestamp later than {ts:?}"),
@@ -849,7 +878,7 @@ impl SyncedLyrics {
                     message: format!("{e}"),
                 });
             }
-            if line.timestamp <= *ts {
+            if line.is_active(*ts) {
                 return Err(Error::InvalidTimestampOrder {
                     index: i + 1,
                     message: format!("Expected a timestamp later than {:?}", ts),
@@ -891,6 +920,19 @@ impl SyncedLyrics {
             }
         }
         false
+    }
+
+    pub fn current_line(&self, timestamp: Duration) -> Option<&LineTag> {
+        if self.lines.is_empty() {
+            None
+        } else {
+            for line in self.lines.iter().rev() {
+                if line.is_active(timestamp) {
+                    return Some(line);
+                }
+            }
+            None
+        }
     }
 
     /// Serialize the struct to LRC format.

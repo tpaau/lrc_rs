@@ -833,3 +833,117 @@ fn synced_lyrics_lyrics_at() {
 
     assert_eq!(lyrics.active_tag(Duration::from_secs(3)), Some(1));
 }
+
+static ACTIVE_TAG_LINE_TAG: LazyLock<LineTag> = LazyLock::new(|| LineTag {
+    timestamp: Duration::from_secs(1),
+    segments: vec![
+        SegmentTag {
+            timestamp: Duration::from_secs(1),
+            content: String::new(),
+        },
+        SegmentTag {
+            timestamp: Duration::from_secs_f32(2.5),
+            content: String::new(),
+        },
+        SegmentTag {
+            timestamp: Duration::from_secs_f32(4.8),
+            content: String::new(),
+        },
+    ],
+});
+
+#[test]
+fn line_tag_active_tag() {
+    let line_tag = &ACTIVE_TAG_LINE_TAG;
+    assert_eq!(line_tag.active_tag(Duration::from_secs(0)), None);
+    assert_eq!(line_tag.active_tag(Duration::from_secs_f32(0.5)), None);
+    assert_eq!(line_tag.active_tag(Duration::from_secs(1)), Some(0));
+    assert_eq!(line_tag.active_tag(Duration::from_secs(2)), Some(0));
+    assert_eq!(line_tag.active_tag(Duration::from_secs_f32(2.5)), Some(1));
+    assert_eq!(line_tag.active_tag(Duration::from_secs(3)), Some(1));
+    assert_eq!(line_tag.active_tag(Duration::from_secs_f32(4.8)), Some(2));
+    assert_eq!(line_tag.active_tag(Duration::from_secs(u64::MAX)), Some(2));
+}
+
+#[test]
+fn line_tag_current_segment() {
+    let line_tag = &ACTIVE_TAG_LINE_TAG;
+    assert_eq!(line_tag.current_segment(Duration::from_secs(0)), None);
+    assert_eq!(line_tag.current_segment(Duration::from_secs_f32(0.5)), None);
+    assert_eq!(
+        line_tag.current_segment(Duration::from_secs(1)),
+        Some(&line_tag.segments[0])
+    );
+    assert_eq!(
+        line_tag.current_segment(Duration::from_secs(2)),
+        Some(&line_tag.segments[0])
+    );
+    assert_eq!(
+        line_tag.current_segment(Duration::from_secs_f32(2.5)),
+        Some(&line_tag.segments[1])
+    );
+    assert_eq!(
+        line_tag.current_segment(Duration::from_secs(3)),
+        Some(&line_tag.segments[1])
+    );
+    assert_eq!(
+        line_tag.current_segment(Duration::from_secs_f32(4.8)),
+        Some(&line_tag.segments[2])
+    );
+    assert_eq!(
+        line_tag.current_segment(Duration::from_secs(u64::MAX)),
+        Some(&line_tag.segments[2])
+    );
+}
+
+static ACTIVE_TAG_LYRICS: LazyLock<SyncedLyrics> = LazyLock::new(|| {
+    SyncedLyrics::new(vec![
+        LineTag::new(Duration::from_secs(1), String::new()),
+        LineTag::new(Duration::from_secs_f32(5.4), String::new()),
+        LineTag::new(Duration::from_secs_f32(8.1), String::new()),
+    ])
+});
+
+#[test]
+fn lyrics_active_tag() {
+    let lyrics = &ACTIVE_TAG_LYRICS;
+    assert_eq!(lyrics.active_tag(Duration::from_secs(0)), None);
+    assert_eq!(lyrics.active_tag(Duration::from_secs_f32(0.5)), None);
+    assert_eq!(lyrics.active_tag(Duration::from_secs(1)), Some(0));
+    assert_eq!(lyrics.active_tag(Duration::from_secs(4)), Some(0));
+    assert_eq!(lyrics.active_tag(Duration::from_secs_f32(5.4)), Some(1));
+    assert_eq!(lyrics.active_tag(Duration::from_secs_f32(7.8)), Some(1));
+    assert_eq!(lyrics.active_tag(Duration::from_secs_f32(8.1)), Some(2));
+    assert_eq!(lyrics.active_tag(Duration::from_secs(u64::MAX)), Some(2));
+}
+
+#[test]
+fn lyrics_current_line() {
+    let lyrics = &ACTIVE_TAG_LYRICS;
+    assert_eq!(lyrics.current_line(Duration::from_secs(0)), None);
+    assert_eq!(lyrics.current_line(Duration::from_secs_f32(0.5)), None);
+    assert_eq!(
+        lyrics.current_line(Duration::from_secs(1)),
+        Some(&lyrics.lines[0])
+    );
+    assert_eq!(
+        lyrics.current_line(Duration::from_secs(4)),
+        Some(&lyrics.lines[0])
+    );
+    assert_eq!(
+        lyrics.current_line(Duration::from_secs_f32(5.4)),
+        Some(&lyrics.lines[1])
+    );
+    assert_eq!(
+        lyrics.current_line(Duration::from_secs_f32(7.8)),
+        Some(&lyrics.lines[1])
+    );
+    assert_eq!(
+        lyrics.current_line(Duration::from_secs_f32(8.1)),
+        Some(&lyrics.lines[2])
+    );
+    assert_eq!(
+        lyrics.current_line(Duration::from_secs(u64::MAX)),
+        Some(&lyrics.lines[2])
+    );
+}
