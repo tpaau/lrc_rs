@@ -1,6 +1,9 @@
 use std::{sync::LazyLock, time::Duration};
 
-use crate::{Error, LRCTool, LineTag, LyricsAccess, SegmentTag, SyncedLyrics};
+use crate::{
+    Error, LRCTool, LineTag, LyricsAccess, SegmentTag, SyncedLyrics, TimestampConstraint,
+    TimestampError,
+};
 
 static PARSED_EXAMPLE: LazyLock<SyncedLyrics> = LazyLock::new(|| SyncedLyrics {
     title: Some("example".to_string()),
@@ -286,12 +289,11 @@ fn line_tag_check_timestamp_order() {
             ]
         }
         .check_timestamp_order(),
-        Err(Error::InvalidTimestampOrder {
-            index: 1,
-            message: format!(
-                "Expected a timestamp later than {:?}",
-                Duration::from_secs(4)
-            )
+        Err(TimestampError {
+            line: None,
+            segment: Some(1),
+            expected: TimestampConstraint::GreaterThan(Duration::from_secs(4)),
+            actual: Duration::from_secs(4),
         })
     );
 }
@@ -369,12 +371,11 @@ fn synced_lyrics_check_timestamp_order() {
             }
         ])
         .check_timestamp_order(),
-        Err(Error::InvalidTimestampOrder {
-            index: 1,
-            message: format!(
-                "Expected a timestamp later than {:?}",
-                Duration::from_secs(6)
-            )
+        Err(TimestampError {
+            line: Some(1),
+            segment: None,
+            expected: TimestampConstraint::GreaterThan(Duration::from_secs(6)),
+            actual: Duration::from_secs(6),
         })
     );
 }
@@ -385,33 +386,30 @@ fn parse_invalid_timestamp_order_fail() {
     assert!(SyncedLyrics::parse("[00:02.10] a\n[00:02.20] b").is_ok());
     assert_eq!(
         SyncedLyrics::parse("[00:02.00] a\n[00:02.00] a"),
-        Err(Error::InvalidTimestampOrder {
-            index: 1,
-            message: format!(
-                "Expected a timestamp later than {:?}",
-                Duration::from_secs(2)
-            )
-        })
+        Err(Error::Timestamp(TimestampError {
+            line: Some(1),
+            segment: None,
+            expected: TimestampConstraint::GreaterThan(Duration::from_secs(2)),
+            actual: Duration::from_secs(2),
+        }))
     );
     assert_eq!(
         SyncedLyrics::parse("[00:02.00] a\n[00:01.00] b"),
-        Err(Error::InvalidTimestampOrder {
-            index: 1,
-            message: format!(
-                "Expected a timestamp later than {:?}",
-                Duration::from_secs(2)
-            )
-        })
+        Err(Error::Timestamp(TimestampError {
+            line: Some(1),
+            segment: None,
+            expected: TimestampConstraint::GreaterThan(Duration::from_secs(2)),
+            actual: Duration::from_secs(1),
+        }))
     );
     assert_eq!(
         SyncedLyrics::parse("[00:02.00] <00:02.30> a <00:02.20> b \n[00:02.90] c"),
-        Err(Error::InvalidTimestampOrder {
-            index: 0,
-            message: format!(
-                "Invalid tag timestamp at index 1: Expected a timestamp later than {:?}",
-                Duration::from_secs_f32(2.3)
-            )
-        })
+        Err(Error::Timestamp(TimestampError {
+            line: Some(0),
+            segment: Some(1),
+            expected: TimestampConstraint::GreaterThan(Duration::from_secs_f32(2.3)),
+            actual: Duration::from_secs_f32(2.2)
+        }))
     );
 }
 
@@ -455,12 +453,11 @@ fn line_tag_add_segment() {
     };
     assert_eq!(
         line.segment(segment),
-        Err(Error::InvalidTimestampOrder {
-            index: 0,
-            message: format!(
-                "Expected a timestamp later than or equal to {:?}",
-                Duration::from_secs(1)
-            )
+        Err(TimestampError {
+            line: None,
+            segment: Some(0),
+            expected: TimestampConstraint::GreaterThanOrEqual(Duration::from_secs(1)),
+            actual: Duration::from_secs_f32(0.5),
         })
     );
     assert_eq!(
@@ -507,12 +504,11 @@ fn line_tag_add_segments() {
     let segments = &[SegmentTag::default()];
     assert_eq!(
         line.segments(segments),
-        Err(Error::InvalidTimestampOrder {
-            index: 0,
-            message: format!(
-                "Expected a timestamp later than or equal to {:?}",
-                Duration::from_secs(1)
-            )
+        Err(TimestampError {
+            line: None,
+            segment: Some(0),
+            expected: TimestampConstraint::GreaterThanOrEqual(Duration::from_secs(1)),
+            actual: Duration::default(),
         })
     );
     assert_eq!(
@@ -570,12 +566,11 @@ fn line_tag_add_segments() {
                 content: String::new()
             }
         ]),
-        Err(Error::InvalidTimestampOrder {
-            index: 0,
-            message: format!(
-                "Expected a timestamp later than or equal to {:?}",
-                Duration::from_secs(1)
-            )
+        Err(TimestampError {
+            line: None,
+            segment: Some(0),
+            expected: TimestampConstraint::GreaterThanOrEqual(Duration::from_secs(1)),
+            actual: Duration::default(),
         })
     );
 
@@ -589,12 +584,11 @@ fn line_tag_add_segments() {
             },
             SegmentTag::default(),
         ]),
-        Err(Error::InvalidTimestampOrder {
-            index: 1,
-            message: format!(
-                "Expected a timestamp later than {:?}",
-                Duration::from_secs(1)
-            )
+        Err(TimestampError {
+            line: None,
+            segment: Some(1),
+            expected: TimestampConstraint::GreaterThan(Duration::from_secs(1)),
+            actual: Duration::default()
         })
     );
 
@@ -611,12 +605,11 @@ fn line_tag_add_segments() {
                 content: String::new()
             },
         ]),
-        Err(Error::InvalidTimestampOrder {
-            index: 1,
-            message: format!(
-                "Expected a timestamp later than {:?}",
-                Duration::from_secs(1)
-            )
+        Err(TimestampError {
+            line: None,
+            segment: Some(1),
+            expected: TimestampConstraint::GreaterThan(Duration::from_secs(1)),
+            actual: Duration::from_secs(1),
         })
     );
 }
@@ -657,24 +650,22 @@ fn synced_lyrics_add_line() {
     };
     assert_eq!(
         lyrics.line(line1),
-        Err(Error::InvalidTimestampOrder {
-            index: 0,
-            message: format!(
-                "Invalid tag timestamp at index 1: Expected a timestamp later than {:?}",
-                Duration::from_secs(2)
-            )
+        Err(TimestampError {
+            line: Some(0),
+            segment: Some(1),
+            expected: TimestampConstraint::GreaterThan(Duration::from_secs(2)),
+            actual: Duration::from_secs(2),
         })
     );
     assert_eq!(lyrics, expected);
 
     assert_eq!(
         lyrics.line(LineTag::default()),
-        Err(Error::InvalidTimestampOrder {
-            index: 0,
-            message: format!(
-                "Expected a timestamp later than {:?}",
-                Duration::from_secs(1)
-            )
+        Err(TimestampError {
+            line: Some(0),
+            segment: None,
+            expected: TimestampConstraint::GreaterThan(Duration::from_secs(1)),
+            actual: Duration::default()
         })
     );
     assert_eq!(lyrics, expected);
@@ -702,9 +693,11 @@ fn synced_lyrics_add_lines() {
             timestamp: Duration::default(),
             segments: Vec::new(),
         }]),
-        Err(Error::InvalidTimestampOrder {
-            index: 0,
-            message: format!("Expected a timestamp later than {:?}", Duration::default())
+        Err(TimestampError {
+            line: Some(0),
+            segment: None,
+            expected: TimestampConstraint::GreaterThan(Duration::default()),
+            actual: Duration::default(),
         })
     );
     assert_eq!(lyrics, expected);
@@ -714,12 +707,11 @@ fn synced_lyrics_add_lines() {
             timestamp: Duration::from_secs(1),
             segments: vec![SegmentTag::default()]
         }]),
-        Err(Error::InvalidTimestampOrder {
-            index: 0,
-            message: format!(
-                "Invalid tag timestamp at index 0: Expected a timestamp later than or equal to {:?}",
-                Duration::from_secs(1)
-            )
+        Err(TimestampError {
+            line: Some(0),
+            segment: Some(0),
+            expected: TimestampConstraint::GreaterThanOrEqual(Duration::from_secs(1)),
+            actual: Duration::default(),
         })
     );
     assert_eq!(lyrics, expected);
@@ -738,12 +730,11 @@ fn synced_lyrics_add_lines() {
                 }
             ]
         }]),
-        Err(Error::InvalidTimestampOrder {
-            index: 0,
-            message: format!(
-                "Invalid tag timestamp at index 1: Expected a timestamp later than {:?}",
-                Duration::from_secs(1)
-            )
+        Err(TimestampError {
+            line: Some(0),
+            segment: Some(1),
+            expected: TimestampConstraint::GreaterThan(Duration::from_secs(1)),
+            actual: Duration::from_secs(1)
         })
     );
     assert_eq!(lyrics, expected);
@@ -762,12 +753,11 @@ fn synced_lyrics_add_lines() {
                 segments: Vec::new()
             }
         ]),
-        Err(Error::InvalidTimestampOrder {
-            index: 1,
-            message: format!(
-                "Expected a timestamp later than {:?}",
-                Duration::from_secs(1)
-            )
+        Err(TimestampError {
+            line: Some(1),
+            segment: None,
+            expected: TimestampConstraint::GreaterThan(Duration::from_secs(1)),
+            actual: Duration::from_secs(1)
         })
     );
 }

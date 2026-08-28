@@ -187,6 +187,22 @@ impl From<nom::error::ErrorKind> for ErrorKind {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum TimestampConstraint {
+    GreaterThan(Duration),
+    GreaterThanOrEqual(Duration),
+}
+
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct TimestampError {
+    pub line: Option<usize>,
+    pub segment: Option<usize>,
+    pub expected: TimestampConstraint,
+    pub actual: Duration,
+}
+
 /// Error indicating why lyrics couldn't be parsed as LRC.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -206,12 +222,7 @@ pub enum Error {
         key: String,
     },
     /// Tag timestamps were not ordered correctly.
-    InvalidTimestampOrder {
-        /// The index of the element in the input at which the order breaks.
-        index: usize,
-        /// Message specifying the expected value.
-        message: String,
-    },
+    Timestamp(TimestampError),
     /// Parsing failed due to a syntax error.
     #[cfg(feature = "parser")]
     Nom {
@@ -244,8 +255,33 @@ impl std::fmt::Display for Error {
             }
             #[cfg(feature = "parser")]
             Self::UnknownKey { key } => write!(f, "Unknown ID tag key: \"{key}\""),
-            Self::InvalidTimestampOrder { index, message } => {
-                write!(f, "Invalid tag timestamp at index {index}: {message}")
+            Self::Timestamp(e) => {
+                let message = match e.expected {
+                    TimestampConstraint::GreaterThan(duration) => {
+                        format!(
+                            "Expected a timestamp greater than {duration:?}, got {:?}",
+                            e.actual
+                        )
+                    }
+                    TimestampConstraint::GreaterThanOrEqual(duration) => format!(
+                        "Expected a timestamp greater than or equal to {duration:?}, got {:?}",
+                        e.actual
+                    ),
+                };
+                match (e.line, e.segment) {
+                    (Some(line), Some(segment)) => {
+                        write!(f, "Line {line}, segment: {segment}: {message}")
+                    }
+                    (Some(line), None) => {
+                        write!(f, "Line {line}: {message}")
+                    }
+                    (None, Some(segment)) => {
+                        write!(f, "Segment {segment}: {message}")
+                    }
+                    (None, None) => {
+                        write!(f, "{message}")
+                    }
+                }
             }
             #[cfg(feature = "parser")]
             Self::Nom { input, error } => {
@@ -332,17 +368,17 @@ pub trait LyricsAccess: Sized {
     /// assert_eq!(
     ///     line.check_timestamp_order(),
     ///     Err(
-    ///         lrc_rs::Error::InvalidTimestampOrder {
-    ///             index: 0,
-    ///             message: format!(
-    ///                 "Expected a timestamp later than or equal to {:?}",
-    ///                 Duration::from_secs(1)
-    ///             )
+    ///         lrc_rs::TimestampError {
+    ///             line: None,
+    ///             segment: Some(0),
+    ///             expected:
+    ///                 lrc_rs::TimestampConstraint::GreaterThanOrEqual(Duration::from_secs(1)),
+    ///             actual: Duration::default(),
     ///         }
     ///     )
     /// );
     /// ```
-    fn check_timestamp_order(&self) -> Result<(), Error>;
+    fn check_timestamp_order(&self) -> Result<(), TimestampError>;
 }
 
 /// Segment of lyrics in a [single line](LineTag), associated with a timestamp.
@@ -479,34 +515,32 @@ impl LyricsAccess for LineTag {
     // NOTE: If a line has only one segment, its timestamp doesn't have to be the same as the
     // timestamp of the line. The window between the line timestamp and the timestamp of the first
     // tag is when no segment is active. It does indicate that the A2 extension is active, though.
-    fn check_timestamp_order(&self) -> Result<(), Error> {
-        if self.segments.is_empty() {
-            Ok(())
-        } else {
-            let mut ts;
-            if self.segments[0].timestamp < self.timestamp {
-                return Err(Error::InvalidTimestampOrder {
-                    index: 0,
-                    message: format!(
-                        "Expected a timestamp later than or equal to {:?}",
-                        self.timestamp
-                    ),
+    fn check_timestamp_order(&self) -> Result<(), TimestampError> {
+        if let Some(segment) = self.segments.first() {
+            if segment.timestamp < self.timestamp {
+                return Err(TimestampError {
+                    line: None,
+                    segment: Some(0),
+                    expected: TimestampConstraint::GreaterThanOrEqual(self.timestamp),
+                    actual: segment.timestamp,
                 });
             } else if self.segments.len() == 1 {
                 return Ok(());
-            } else {
-                ts = &self.segments[0].timestamp;
             }
+            let mut ts = &segment.timestamp;
             for (i, segment) in self.segments[1..self.segments.len()].iter().enumerate() {
                 if segment.is_active(*ts) {
-                    return Err(Error::InvalidTimestampOrder {
-                        index: i + 1,
-                        message: format!("Expected a timestamp later than {ts:?}"),
+                    return Err(TimestampError {
+                        line: None,
+                        segment: Some(i + 1),
+                        expected: TimestampConstraint::GreaterThan(*ts),
+                        actual: segment.timestamp,
                     });
-                } else {
-                    ts = &segment.timestamp;
                 }
+                ts = &segment.timestamp;
             }
+            Ok(())
+        } else {
             Ok(())
         }
     }
@@ -604,7 +638,7 @@ impl LineTag {
     /// Prefer using this method over manually adding segments to lines as it ensures that the
     /// timestamp order stays correct. If you need to add segments manually, use the
     /// [`check_timestamp_order`](Self::check_timestamp_order) method to verify the timestamp order.
-    pub fn segment(&mut self, segment: SegmentTag) -> Result<&mut Self, Error> {
+    pub fn segment(&mut self, segment: SegmentTag) -> Result<&mut Self, TimestampError> {
         self.segments(&[segment])
     }
 
@@ -613,25 +647,26 @@ impl LineTag {
     /// Prefer using this method over manually adding segments to lines as it ensures that the
     /// timestamp order stays correct. If you need to add segments manually, use the
     /// [`check_timestamp_order`](Self::check_timestamp_order) method to verify the timestamp order.
-    pub fn segments(&mut self, segments: &[SegmentTag]) -> Result<&mut Self, Error> {
+    pub fn segments(&mut self, segments: &[SegmentTag]) -> Result<&mut Self, TimestampError> {
         if segments.is_empty() {
             Ok(self)
         } else if self.segments.is_empty() {
             if segments[0].timestamp < self.timestamp {
-                return Err(Error::InvalidTimestampOrder {
-                    index: 0,
-                    message: format!(
-                        "Expected a timestamp later than or equal to {:?}",
-                        self.timestamp
-                    ),
+                return Err(TimestampError {
+                    line: None,
+                    segment: Some(0),
+                    expected: TimestampConstraint::GreaterThanOrEqual(self.timestamp),
+                    actual: segments[0].timestamp,
                 });
             }
             let mut ts = &self.timestamp;
             for (i, segment) in segments[1..segments.len()].iter().enumerate() {
                 if segment.is_active(*ts) {
-                    return Err(Error::InvalidTimestampOrder {
-                        index: i + 1,
-                        message: format!("Expected a timestamp later than {ts:?}"),
+                    return Err(TimestampError {
+                        line: None,
+                        segment: Some(i + 1),
+                        expected: TimestampConstraint::GreaterThan(*ts),
+                        actual: segment.timestamp,
                     });
                 } else {
                     ts = &segment.timestamp;
@@ -643,9 +678,11 @@ impl LineTag {
             let mut ts = self.last_timestamp();
             for (i, segment) in segments.iter().enumerate() {
                 if segment.is_active(*ts) {
-                    return Err(Error::InvalidTimestampOrder {
-                        index: i,
-                        message: format!("Expected a timestamp later than {ts:?}"),
+                    return Err(TimestampError {
+                        line: None,
+                        segment: Some(i),
+                        expected: TimestampConstraint::GreaterThan(*ts),
+                        actual: segment.timestamp,
                     });
                 } else {
                     ts = &segment.timestamp;
@@ -765,32 +802,31 @@ impl LyricsAccess for SyncedLyrics {
             .unwrap_or_default()
     }
 
-    fn check_timestamp_order(&self) -> Result<(), Error> {
-        if self.lines.is_empty() {
-            Ok(())
-        } else {
-            if let Err(e) = self.lines[0].check_timestamp_order() {
-                return Err(Error::InvalidTimestampOrder {
-                    index: 0,
-                    message: format!("{e}"),
-                });
+    fn check_timestamp_order(&self) -> Result<(), TimestampError> {
+        if let Some(line) = self.lines.first() {
+            if let Err(e) = line.check_timestamp_order() {
+                return Err(TimestampError { line: Some(0), ..e });
             }
-            let mut ts = self.lines[0].last_timestamp();
+            let mut ts = line.last_timestamp();
             for (i, line) in self.lines[1..self.lines.len()].iter().enumerate() {
                 if let Err(e) = line.check_timestamp_order() {
-                    return Err(Error::InvalidTimestampOrder {
-                        index: i + 1,
-                        message: format!("{e}"),
+                    return Err(TimestampError {
+                        line: Some(i + 1),
+                        ..e
                     });
                 } else if line.is_active(*ts) {
-                    return Err(Error::InvalidTimestampOrder {
-                        index: i + 1,
-                        message: format!("Expected a timestamp later than {ts:?}"),
+                    return Err(TimestampError {
+                        line: Some(i + 1),
+                        segment: None,
+                        expected: TimestampConstraint::GreaterThan(*ts),
+                        actual: line.timestamp,
                     });
                 } else {
                     ts = line.last_timestamp();
                 }
             }
+            Ok(())
+        } else {
             Ok(())
         }
     }
@@ -912,7 +948,7 @@ impl SyncedLyrics {
     /// Prefer using this method over manually adding lines to lyrics as it ensures that the
     /// timestamp order stays correct. If you need to add lines manually, use the
     /// [`check_timestamp_order`](Self::check_timestamp_order) method to verify the timestamp order.
-    pub fn line(&mut self, line: LineTag) -> Result<&mut Self, Error> {
+    pub fn line(&mut self, line: LineTag) -> Result<&mut Self, TimestampError> {
         self.lines(&[line])
     }
 
@@ -921,42 +957,43 @@ impl SyncedLyrics {
     /// Prefer using this method over manually adding lines to lyrics as it ensures that the
     /// timestamp order stays correct. If you need to add lines manually, use the
     /// [`check_timestamp_order`](Self::check_timestamp_order) method to verify the timestamp order.
-    pub fn lines(&mut self, lines: &[LineTag]) -> Result<&mut Self, Error> {
-        if lines.is_empty() {
-            return Ok(self);
-        } else if let Err(e) = lines[0].check_timestamp_order() {
-            return Err(Error::InvalidTimestampOrder {
-                index: 0,
-                message: format!("{e}"),
-            });
-        }
-        if !self.lines.is_empty() {
-            let ts = *self.lines[self.lines.len() - 1].last_timestamp();
-            if lines[0].timestamp <= ts {
-                return Err(Error::InvalidTimestampOrder {
-                    index: 0,
-                    message: format!("Expected a timestamp later than {:?}", ts),
-                });
+    pub fn lines(&mut self, lines: &[LineTag]) -> Result<&mut Self, TimestampError> {
+        if let Some(first) = lines.first() {
+            if let Err(e) = first.check_timestamp_order() {
+                return Err(TimestampError { line: Some(0), ..e });
+            } else if let Some(last) = self.lines.last() {
+                if first.timestamp <= *last.last_timestamp() {
+                    return Err(TimestampError {
+                        line: Some(0),
+                        segment: None,
+                        expected: TimestampConstraint::GreaterThan(*last.last_timestamp()),
+                        actual: first.timestamp,
+                    });
+                }
             }
-        }
-        let mut ts = lines[0].last_timestamp();
-        for (i, line) in lines[1..lines.len()].iter().enumerate() {
-            if let Err(e) = line.check_timestamp_order() {
-                return Err(Error::InvalidTimestampOrder {
-                    index: i + 1,
-                    message: format!("{e}"),
-                });
+            let mut ts = first.last_timestamp();
+            for (i, line) in lines[1..lines.len()].iter().enumerate() {
+                if line.is_active(*ts) {
+                    return Err(TimestampError {
+                        line: Some(i + 1),
+                        segment: None,
+                        expected: TimestampConstraint::GreaterThan(*ts),
+                        actual: line.timestamp,
+                    });
+                }
+                if let Err(e) = line.check_timestamp_order() {
+                    return Err(TimestampError {
+                        line: Some(i + 1),
+                        ..e
+                    });
+                }
+                ts = &line.timestamp;
             }
-            if line.is_active(*ts) {
-                return Err(Error::InvalidTimestampOrder {
-                    index: i + 1,
-                    message: format!("Expected a timestamp later than {:?}", ts),
-                });
-            }
-            ts = &line.timestamp;
+            self.lines.extend_from_slice(lines);
+            Ok(self)
+        } else {
+            Ok(self)
         }
-        self.lines.extend_from_slice(lines);
-        Ok(self)
     }
 
     /// Create an empty synced lyrics struct with some timed tags.
@@ -1120,13 +1157,12 @@ assert_eq!(parsed.serialize(), parsed_twice);
     /// [00:01.90] My timestamp is wrong!";
     /// assert_eq!(
     ///     SyncedLyrics::parse(content),
-    ///     Err(Error::InvalidTimestampOrder {
-    ///         index: 1,
-    ///         message: format!(
-    ///             "Expected a timestamp later than {:?}",
-    ///             Duration::from_secs_f32(2.1)
-    ///         )
-    ///     })
+    ///     Err(Error::Timestamp(lrc_rs::TimestampError {
+    ///         line: Some(1),
+    ///         segment: None,
+    ///         expected: lrc_rs::TimestampConstraint::GreaterThan(Duration::from_secs_f32(2.10)),
+    ///         actual: Duration::from_secs_f32(1.9),
+    ///     }))
     /// );
     /// ```
     #[cfg(feature = "parser")]
@@ -1220,18 +1256,17 @@ assert_eq!(parsed.serialize(), parsed_twice);
                 let mut timestamp = None;
                 for (i, line) in lines.iter().enumerate() {
                     if let Err(e) = line.check_timestamp_order() {
-                        return Err(Error::InvalidTimestampOrder {
-                            index: i,
-                            message: format!("{e}"),
-                        });
+                        return Err(Error::Timestamp(TimestampError { line: Some(i), ..e }));
                     }
                     if let Some(ts) = timestamp
                         && line.last_timestamp() <= ts
                     {
-                        return Err(Error::InvalidTimestampOrder {
-                            index: i,
-                            message: format!("Expected a timestamp later than {ts:?}"),
-                        });
+                        return Err(Error::Timestamp(TimestampError {
+                            line: Some(i),
+                            segment: None,
+                            expected: TimestampConstraint::GreaterThan(*ts),
+                            actual: *line.last_timestamp(),
+                        }));
                     }
                     timestamp = Some(line.last_timestamp())
                 }
