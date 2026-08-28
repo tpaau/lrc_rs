@@ -281,7 +281,7 @@ pub trait LyricsAccess: Sized {
     /// Returns the index of the active tag or [`None`] if no tag is active for the given
     /// timestamp.
     ///
-    /// **WARNING**: This function might return wrong results if the segment timestamp order is not
+    /// **WARNING**: this method may return wrong results if the segment timestamp order is not
     /// correct.
     ///
     /// # Examples
@@ -305,6 +305,12 @@ pub trait LyricsAccess: Sized {
     fn active_tag(&self, timestamp: Duration) -> Option<usize>;
 
     /// Returns whether the element is active for the given timestamp.
+    ///
+    /// **WARNING**: this method may return wrong results if the segment timestamp order is not
+    /// correct.
+    ///
+    /// The general idea is: if the timestamp is greater or equal to the earliest timestamp of the
+    /// element, then the element is active.
     fn is_active(&self, timestamp: Duration) -> bool;
 
     /// Checks if timed tag timestamps are ordered correctly.
@@ -373,20 +379,24 @@ impl SegmentTag {
     }
 
     /// Returns whether the segment is active at the given timestamp.
+    ///
+    /// A segment is considered active if the given timestamp is greater to or equal to the segment
+    /// timestamp.
+    ///
+    /// # Examples
+    /// ```
+    /// # use std::time::Duration;
+    /// # use lrc_rs::SegmentTag;
+    /// let segment = SegmentTag::new(Duration::from_secs(2), String::new());
+    ///
+    /// assert!(!segment.is_active(Duration::default()));
+    /// assert!(!segment.is_active(Duration::from_secs(1)));
+    /// assert!(segment.is_active(Duration::from_secs(2)));
+    /// assert!(segment.is_active(Duration::from_secs(3)));
+    /// assert!(segment.is_active(Duration::from_secs(u64::MAX)));
+    /// ```
     pub fn is_active(&self, timestamp: Duration) -> bool {
         self.timestamp <= timestamp
-    }
-
-    /// Set the timestamp of the segment.
-    pub fn timestamp(&mut self, timestamp: Duration) -> &mut Self {
-        self.timestamp = timestamp;
-        self
-    }
-
-    /// Set the content of the segment.
-    pub fn content(&mut self, content: String) -> &mut Self {
-        self.content = content;
-        self
     }
 }
 
@@ -435,6 +445,33 @@ impl LyricsAccess for LineTag {
         }
     }
 
+    /// Returns whether the line is active for the given timestamp.
+    ///
+    /// A line is considered active if the given timestamp is greater than or equal to the line
+    /// timestamp. The line timestamp is considered to be the earliest, so if any of the segments
+    /// have a timestamp that is earlier than the line timestamp, this method will return wrong
+    /// results.
+    ///
+    /// # Examples
+    /// ```
+    /// # use std::time::Duration;
+    /// # use lrc_rs::{LineTag, LyricsAccess, SegmentTag};
+    /// let line = LineTag {
+    ///     // Only this timestamp is considered when evaluating whether the line is active or not
+    ///     timestamp: Duration::from_secs(5),
+    ///     // Those segments don't actually matter here
+    ///     segments: vec![
+    ///         SegmentTag::new(Duration::from_secs(5), String::new()),
+    ///         SegmentTag::new(Duration::from_secs(7), String::new()),
+    ///     ],
+    /// };
+    ///
+    /// assert!(!line.is_active(Duration::default()));
+    /// assert!(!line.is_active(Duration::from_secs(3)));
+    /// assert!(line.is_active(Duration::from_secs(5)));
+    /// assert!(line.is_active(Duration::from_secs(23)));
+    /// assert!(line.is_active(Duration::from_secs(u64::MAX)));
+    /// ```
     fn is_active(&self, timestamp: Duration) -> bool {
         self.timestamp <= timestamp
     }
@@ -689,6 +726,38 @@ impl LyricsAccess for SyncedLyrics {
         }
     }
 
+    /// Returns whether the line is active for the given timestamp.
+    ///
+    /// Lyrics are considered active if the given timestamp is greater than or equal to the
+    /// timestamp of the first line of the lyrics. The first line is assumed to have the earliest
+    /// timestamp, so if the line order is not correct this method may return wrong results.
+    ///
+    /// # Examples
+    /// ```
+    /// # use std::time::Duration;
+    /// # use lrc_rs::{LineTag, LyricsAccess, SegmentTag, SyncedLyrics};
+    /// let lyrics = SyncedLyrics::new(vec![
+    ///     LineTag {
+    ///         // Checking whether lyrics are active is delegated to the first line
+    ///         timestamp: Duration::from_secs(11),
+    ///         segments: vec![
+    ///             SegmentTag::new(Duration::from_secs(12), String::new()),
+    ///             SegmentTag::new(Duration::from_secs(15), String::new())
+    ///         ]
+    ///     },
+    ///     // All other stuff doesn't matter
+    ///     LineTag {
+    ///         timestamp: Duration::from_secs(11),
+    ///         segments: vec![SegmentTag::new(Duration::from_secs(12), String::new())]
+    ///     }
+    /// ]);
+    ///
+    /// assert!(!lyrics.is_active(Duration::default()));
+    /// assert!(!lyrics.is_active(Duration::from_secs(3)));
+    /// assert!(lyrics.is_active(Duration::from_secs(11)));
+    /// assert!(lyrics.is_active(Duration::from_secs(67)));
+    /// assert!(lyrics.is_active(Duration::from_secs(u64::MAX)));
+    /// ```
     fn is_active(&self, timestamp: Duration) -> bool {
         self.lines
             .get(0)

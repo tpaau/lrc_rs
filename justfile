@@ -5,7 +5,7 @@ open-doc:
 	cargo doc --no-deps -p lrc_rs --all-features --open
 
 test:
-	cargo test
+	cargo test --all-features
 	cargo test --no-default-features
 
 check:
