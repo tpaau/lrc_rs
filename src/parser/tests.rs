@@ -31,6 +31,7 @@ fn till_a2_tag_or_end() {
         parser::till_a2_tag("aaaaaaaaaa <"),
         Ok(("<", "aaaaaaaaaa "))
     );
+    assert_eq!(parser::till_a2_tag("aaaaaaaaaa<"), Ok(("<", "aaaaaaaaaa")));
     assert_eq!(parser::till_a2_tag("hello"), Ok(("", "hello")));
     assert_eq!(parser::till_a2_tag(""), Ok(("", "")));
 }
@@ -166,12 +167,38 @@ fn a2_tag() {
         ))
     );
     assert_eq!(
+        many0(parser::a2_tag).parse("<00:00.00>Hello<00:01.00>World!"),
+        Ok((
+            "",
+            vec![
+                parser::TimestampedSegment {
+                    timestamp: Duration::default(),
+                    content: "Hello"
+                },
+                parser::TimestampedSegment {
+                    timestamp: Duration::from_secs_f32(1.0),
+                    content: "World!"
+                }
+            ]
+        ))
+    );
+    assert_eq!(
         parser::a2_tag("<00:00.00> Hello <00:01.00> World!"),
         Ok((
             "<00:01.00> World!",
             parser::TimestampedSegment {
                 timestamp: Duration::default(),
                 content: "Hello "
+            }
+        ))
+    );
+    assert_eq!(
+        parser::a2_tag("<00:00.00>Hello<00:01.00>World!"),
+        Ok((
+            "<00:01.00>World!",
+            parser::TimestampedSegment {
+                timestamp: Duration::default(),
+                content: "Hello"
             }
         ))
     );
@@ -338,6 +365,25 @@ fn line_with_a2() {
     assert_eq!(
         parser::line_with_a2("[00:01.10] <00:01.10> Hello <00:02.00> World!"),
         expected
+    );
+    assert_eq!(
+        parser::line_with_a2("[00:01.10]<00:01.10>Hello<00:02.00>World!"),
+        Ok((
+            "",
+            TimestampedTag {
+                timestamp: Duration::from_secs_f32(1.1),
+                segments: vec![
+                    TimestampedSegment {
+                        timestamp: Duration::from_secs_f32(1.1),
+                        content: "Hello",
+                    },
+                    TimestampedSegment {
+                        timestamp: Duration::from_secs_f32(2.0),
+                        content: "World!",
+                    },
+                ],
+            },
+        ))
     );
     assert_eq!(
         parser::line_with_a2("[00:01.10] <00:01.10> Hello <00:02.00> World!\n"),
@@ -514,4 +560,33 @@ fn id_tags_after_timed_tags_fail() {
             ErrorKind::Eof
         ))
     );
+}
+
+#[test]
+fn parse_line() {
+    let str = "[00:10.20]a<00:10.30>b<00:10.55>c<00:10.80>d";
+
+    let expected = Ok(vec![Line::Tag(TimestampedTag {
+        timestamp: parser::timestamp("00:10.20").unwrap().1,
+        segments: vec![
+            TimestampedSegment {
+                timestamp: parser::timestamp("00:10.20").unwrap().1,
+                content: "a",
+            },
+            TimestampedSegment {
+                timestamp: parser::timestamp("00:10.30").unwrap().1,
+                content: "b",
+            },
+            TimestampedSegment {
+                timestamp: parser::timestamp("00:10.55").unwrap().1,
+                content: "c",
+            },
+            TimestampedSegment {
+                timestamp: parser::timestamp("00:10.80").unwrap().1,
+                content: "d",
+            },
+        ],
+    })]);
+
+    assert_eq!(parser::parse(str), expected);
 }
