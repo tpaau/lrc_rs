@@ -118,10 +118,26 @@ fn id_tag<'a>(i: &'a str) -> IResult<&'a str, IDTag<'a>> {
 
 fn line_with_a2<'a>(i: &'a str) -> IResult<&'a str, TimestampedTag<'a>> {
     map(
-        (standard_timestamp, space0, many0(a2_tag), newline_or_end),
-        |(timestamp, _, tags, _)| TimestampedTag {
+        (
+            standard_timestamp,
+            space0,
+            till_a2_tag,
+            many0(a2_tag),
+            newline_or_end,
+        ),
+        |(timestamp, _, initial_content, tags, _)| TimestampedTag {
             timestamp,
-            segments: tags,
+            segments: {
+                let mut segments = Vec::with_capacity(tags.len());
+                if !initial_content.is_empty() {
+                    segments.push(TimestampedSegment {
+                        timestamp,
+                        content: initial_content,
+                    });
+                }
+                segments.extend(tags);
+                segments
+            },
         },
     )
     .parse(i)
