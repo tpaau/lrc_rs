@@ -226,13 +226,20 @@ impl std::fmt::Display for TimestampError {
         };
         match (self.line, self.segment) {
             (Some(line), Some(segment)) => {
-                write!(f, "Line {line}, segment: {segment}: {message}")
+                let line_actual = line + 1;
+                let segment_actual = segment + 1;
+                write!(
+                    f,
+                    "Line {line_actual}, segment: {segment_actual}: {message}"
+                )
             }
             (Some(line), None) => {
-                write!(f, "Line {line}: {message}")
+                let line_actual = line + 1;
+                write!(f, "Line {line_actual}: {message}")
             }
             (None, Some(segment)) => {
-                write!(f, "Segment {segment}: {message}")
+                let segment_actual = segment + 1;
+                write!(f, "Segment {segment_actual}: {message}")
             }
             (None, None) => {
                 write!(f, "{message}")
