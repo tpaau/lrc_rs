@@ -208,6 +208,39 @@ pub struct TimestampError {
     pub actual: Duration,
 }
 
+impl std::fmt::Display for TimestampError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self.expected {
+            TimestampConstraint::GreaterThan(duration) => {
+                format!(
+                    "Expected a timestamp greater than {}, got {}",
+                    duration_to_timestamp(duration),
+                    duration_to_timestamp(self.actual)
+                )
+            }
+            TimestampConstraint::GreaterThanOrEqual(duration) => format!(
+                "Expected a timestamp greater than or equal to {}, got {}",
+                duration_to_timestamp(duration),
+                duration_to_timestamp(self.actual)
+            ),
+        };
+        match (self.line, self.segment) {
+            (Some(line), Some(segment)) => {
+                write!(f, "Line {line}, segment: {segment}: {message}")
+            }
+            (Some(line), None) => {
+                write!(f, "Line {line}: {message}")
+            }
+            (None, Some(segment)) => {
+                write!(f, "Segment {segment}: {message}")
+            }
+            (None, None) => {
+                write!(f, "{message}")
+            }
+        }
+    }
+}
+
 /// Error indicating why lyrics couldn't be parsed as LRC.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -260,34 +293,7 @@ impl std::fmt::Display for Error {
             }
             #[cfg(feature = "parser")]
             Self::UnknownKey { key } => write!(f, "Unknown ID tag key: \"{key}\""),
-            Self::Timestamp(e) => {
-                let message = match e.expected {
-                    TimestampConstraint::GreaterThan(duration) => {
-                        format!(
-                            "Expected a timestamp greater than {duration:?}, got {:?}",
-                            e.actual
-                        )
-                    }
-                    TimestampConstraint::GreaterThanOrEqual(duration) => format!(
-                        "Expected a timestamp greater than or equal to {duration:?}, got {:?}",
-                        e.actual
-                    ),
-                };
-                match (e.line, e.segment) {
-                    (Some(line), Some(segment)) => {
-                        write!(f, "Line {line}, segment: {segment}: {message}")
-                    }
-                    (Some(line), None) => {
-                        write!(f, "Line {line}: {message}")
-                    }
-                    (None, Some(segment)) => {
-                        write!(f, "Segment {segment}: {message}")
-                    }
-                    (None, None) => {
-                        write!(f, "{message}")
-                    }
-                }
-            }
+            Self::Timestamp(e) => write!(f, "{e}"),
             #[cfg(feature = "parser")]
             Self::Nom { input, error } => {
                 write!(f, "Couldn't parse the lyrics at `{input}`: {error:?}`")
