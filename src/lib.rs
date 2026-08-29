@@ -1,7 +1,9 @@
 #![doc = include_str!("../README.md")]
 #![feature(doc_cfg)]
-#[cfg(feature = "parser")]
-mod parser;
+#[cfg(any(feature = "parser", feature = "sanitizer"))]
+pub(crate) mod parser;
+#[cfg(feature = "sanitizer")]
+mod sanitizer;
 #[cfg(test)]
 mod tests;
 
@@ -14,6 +16,9 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "log")]
 use log::warn;
+
+#[cfg(feature = "sanitizer")]
+pub use sanitizer::strip_tags;
 
 #[cfg(feature = "parser")]
 fn duration_offset(dur: Duration, offset_ms: i64) -> Result<Duration, Error> {

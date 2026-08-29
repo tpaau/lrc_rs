@@ -1,9 +1,11 @@
 use std::{sync::LazyLock, time::Duration};
 
 use crate::{
-    Error, LRCTool, LineTag, LyricsAccess, SegmentTag, SyncedLyrics, TimestampConstraint,
-    TimestampError,
+    LRCTool, LineTag, LyricsAccess, SegmentTag, SyncedLyrics, TimestampConstraint, TimestampError,
 };
+
+#[cfg(feature = "parser")]
+use crate::Error;
 
 static PARSED_EXAMPLE: LazyLock<SyncedLyrics> = LazyLock::new(|| SyncedLyrics {
     title: Some("example".to_string()),
