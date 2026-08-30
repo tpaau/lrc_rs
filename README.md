@@ -15,7 +15,7 @@ Docs can be found [here](https://tpaau.github.io/lrc_rs/lrc_rs/).
 
 ## Examples
 [Chilen](https://github.com/tpaau/chilen) uses the `lrc_rs` crate for parsing and displaying lyrics
-![Lyrics synchronization showcase](https://github.com/tpaau/lrc_rs/blob/main/sync-showcase.mp4)
+![Lyrics synchronization showcase](https://github.com/tpaau/lrc_rs/blob/main/sync-showcase.gif)
 
 Parse some LRC content
 ```rust
