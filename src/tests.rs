@@ -303,13 +303,9 @@ fn line_tag_check_timestamp_order() {
 #[test]
 fn synced_lyrics_check_timestamp_order() {
     assert!(SyncedLyrics::default().check_timestamp_order().is_ok());
+    assert!(SyncedLyrics::try_new(vec![LineTag::default()]).is_ok());
     assert!(
-        SyncedLyrics::new(vec![LineTag::default()])
-            .check_timestamp_order()
-            .is_ok()
-    );
-    assert!(
-        SyncedLyrics::new(vec![
+        SyncedLyrics::try_new(vec![
             LineTag {
                 timestamp: Duration::from_secs(5),
                 segments: Vec::new()
@@ -319,11 +315,10 @@ fn synced_lyrics_check_timestamp_order() {
                 segments: Vec::new()
             }
         ])
-        .check_timestamp_order()
         .is_ok()
     );
     assert!(
-        SyncedLyrics::new(vec![
+        SyncedLyrics::try_new(vec![
             LineTag {
                 timestamp: Duration::from_secs(5),
                 segments: vec![
@@ -355,23 +350,25 @@ fn synced_lyrics_check_timestamp_order() {
                 segments: Vec::new()
             }
         ])
-        .check_timestamp_order()
         .is_ok()
     );
     assert_eq!(
-        SyncedLyrics::new(vec![
-            LineTag {
-                timestamp: Duration::from_secs(5),
-                segments: vec![SegmentTag {
+        SyncedLyrics {
+            lines: vec![
+                LineTag {
+                    timestamp: Duration::from_secs(5),
+                    segments: vec![SegmentTag {
+                        timestamp: Duration::from_secs(6),
+                        content: String::new()
+                    }]
+                },
+                LineTag {
                     timestamp: Duration::from_secs(6),
-                    content: String::new()
-                }]
-            },
-            LineTag {
-                timestamp: Duration::from_secs(6),
-                segments: Vec::new()
-            }
-        ])
+                    segments: Vec::new()
+                }
+            ],
+            ..Default::default()
+        }
         .check_timestamp_order(),
         Err(TimestampError {
             line: Some(1),
@@ -779,13 +776,16 @@ fn line_tag_lyrics_at() {
             },
         ],
     };
-    assert_eq!(line.active_tag(Duration::default()), None);
-    assert_eq!(line.active_tag(Duration::from_secs(1)), None);
-    assert_eq!(line.active_tag(Duration::from_secs_f32(1.5)), None);
-    assert_eq!(line.active_tag(Duration::from_secs(2)), Some(0));
-    assert_eq!(line.active_tag(Duration::from_secs_f32(2.5)), Some(0));
-    assert_eq!(line.active_tag(Duration::from_secs(3)), Some(1));
-    assert_eq!(line.active_tag(Duration::from_secs(u64::MAX)), Some(1));
+    assert_eq!(line.active_tag_index(Duration::default()), None);
+    assert_eq!(line.active_tag_index(Duration::from_secs(1)), None);
+    assert_eq!(line.active_tag_index(Duration::from_secs_f32(1.5)), None);
+    assert_eq!(line.active_tag_index(Duration::from_secs(2)), Some(0));
+    assert_eq!(line.active_tag_index(Duration::from_secs_f32(2.5)), Some(0));
+    assert_eq!(line.active_tag_index(Duration::from_secs(3)), Some(1));
+    assert_eq!(
+        line.active_tag_index(Duration::from_secs(u64::MAX)),
+        Some(1)
+    );
 
     let line = LineTag {
         timestamp: Duration::from_secs(1),
@@ -794,36 +794,41 @@ fn line_tag_lyrics_at() {
             content: String::new(),
         }],
     };
-    assert_eq!(line.active_tag(Duration::default()), None);
-    assert_eq!(line.active_tag(Duration::from_secs(1)), Some(0));
+    assert_eq!(line.active_tag_index(Duration::default()), None);
+    assert_eq!(line.active_tag_index(Duration::from_secs(1)), Some(0));
 }
 
 #[test]
 fn synced_lyrics_lyrics_at() {
-    let lyrics = SyncedLyrics::new(vec![
+    let lyrics = SyncedLyrics::try_new(vec![
         LineTag::new(Duration::from_secs(1), String::new()),
         LineTag::new(Duration::from_secs(3), String::new()),
         LineTag::new(Duration::from_secs(7), String::new()),
-    ]);
-    assert_eq!(lyrics.active_tag(Duration::default()), None);
-    assert_eq!(lyrics.active_tag(Duration::from_secs_f32(0.5)), None);
-    assert_eq!(lyrics.active_tag(Duration::from_secs(1)), Some(0));
-    assert_eq!(lyrics.active_tag(Duration::from_secs(2)), Some(0));
-    assert_eq!(lyrics.active_tag(Duration::from_secs(3)), Some(1));
-    assert_eq!(lyrics.active_tag(Duration::from_secs(6)), Some(1));
-    assert_eq!(lyrics.active_tag(Duration::from_secs(7)), Some(2));
-    assert_eq!(lyrics.active_tag(Duration::from_secs(u64::MAX)), Some(2));
+    ])
+    .unwrap();
+    assert_eq!(lyrics.active_tag_index(Duration::default()), None);
+    assert_eq!(lyrics.active_tag_index(Duration::from_secs_f32(0.5)), None);
+    assert_eq!(lyrics.active_tag_index(Duration::from_secs(1)), Some(0));
+    assert_eq!(lyrics.active_tag_index(Duration::from_secs(2)), Some(0));
+    assert_eq!(lyrics.active_tag_index(Duration::from_secs(3)), Some(1));
+    assert_eq!(lyrics.active_tag_index(Duration::from_secs(6)), Some(1));
+    assert_eq!(lyrics.active_tag_index(Duration::from_secs(7)), Some(2));
+    assert_eq!(
+        lyrics.active_tag_index(Duration::from_secs(u64::MAX)),
+        Some(2)
+    );
 
-    let lyrics = SyncedLyrics::new(vec![
+    let lyrics = SyncedLyrics::try_new(vec![
         LineTag::new(Duration::from_secs_f32(1.2), String::new()),
         LineTag {
             timestamp: Duration::from_secs(2),
             segments: Vec::new(),
         },
         LineTag::new(Duration::from_secs_f32(4.1), String::new()),
-    ]);
+    ])
+    .unwrap();
 
-    assert_eq!(lyrics.active_tag(Duration::from_secs(3)), Some(1));
+    assert_eq!(lyrics.active_tag_index(Duration::from_secs(3)), Some(1));
 }
 
 static ACTIVE_TAG_LINE_TAG: LazyLock<LineTag> = LazyLock::new(|| LineTag {
@@ -845,97 +850,122 @@ static ACTIVE_TAG_LINE_TAG: LazyLock<LineTag> = LazyLock::new(|| LineTag {
 });
 
 #[test]
+fn line_tag_active_tag_index() {
+    let line_tag = &ACTIVE_TAG_LINE_TAG;
+    assert_eq!(line_tag.active_tag_index(Duration::from_secs(0)), None);
+    assert_eq!(
+        line_tag.active_tag_index(Duration::from_secs_f32(0.5)),
+        None
+    );
+    assert_eq!(line_tag.active_tag_index(Duration::from_secs(1)), Some(0));
+    assert_eq!(line_tag.active_tag_index(Duration::from_secs(2)), Some(0));
+    assert_eq!(
+        line_tag.active_tag_index(Duration::from_secs_f32(2.5)),
+        Some(1)
+    );
+    assert_eq!(line_tag.active_tag_index(Duration::from_secs(3)), Some(1));
+    assert_eq!(
+        line_tag.active_tag_index(Duration::from_secs_f32(4.8)),
+        Some(2)
+    );
+    assert_eq!(
+        line_tag.active_tag_index(Duration::from_secs(u64::MAX)),
+        Some(2)
+    );
+}
+
+#[test]
 fn line_tag_active_tag() {
     let line_tag = &ACTIVE_TAG_LINE_TAG;
     assert_eq!(line_tag.active_tag(Duration::from_secs(0)), None);
     assert_eq!(line_tag.active_tag(Duration::from_secs_f32(0.5)), None);
-    assert_eq!(line_tag.active_tag(Duration::from_secs(1)), Some(0));
-    assert_eq!(line_tag.active_tag(Duration::from_secs(2)), Some(0));
-    assert_eq!(line_tag.active_tag(Duration::from_secs_f32(2.5)), Some(1));
-    assert_eq!(line_tag.active_tag(Duration::from_secs(3)), Some(1));
-    assert_eq!(line_tag.active_tag(Duration::from_secs_f32(4.8)), Some(2));
-    assert_eq!(line_tag.active_tag(Duration::from_secs(u64::MAX)), Some(2));
-}
-
-#[test]
-fn line_tag_current_segment() {
-    let line_tag = &ACTIVE_TAG_LINE_TAG;
-    assert_eq!(line_tag.current_segment(Duration::from_secs(0)), None);
-    assert_eq!(line_tag.current_segment(Duration::from_secs_f32(0.5)), None);
     assert_eq!(
-        line_tag.current_segment(Duration::from_secs(1)),
+        line_tag.active_tag(Duration::from_secs(1)),
         Some(&line_tag.segments[0])
     );
     assert_eq!(
-        line_tag.current_segment(Duration::from_secs(2)),
+        line_tag.active_tag(Duration::from_secs(2)),
         Some(&line_tag.segments[0])
     );
     assert_eq!(
-        line_tag.current_segment(Duration::from_secs_f32(2.5)),
+        line_tag.active_tag(Duration::from_secs_f32(2.5)),
         Some(&line_tag.segments[1])
     );
     assert_eq!(
-        line_tag.current_segment(Duration::from_secs(3)),
+        line_tag.active_tag(Duration::from_secs(3)),
         Some(&line_tag.segments[1])
     );
     assert_eq!(
-        line_tag.current_segment(Duration::from_secs_f32(4.8)),
+        line_tag.active_tag(Duration::from_secs_f32(4.8)),
         Some(&line_tag.segments[2])
     );
     assert_eq!(
-        line_tag.current_segment(Duration::from_secs(u64::MAX)),
+        line_tag.active_tag(Duration::from_secs(u64::MAX)),
         Some(&line_tag.segments[2])
     );
 }
 
 static ACTIVE_TAG_LYRICS: LazyLock<SyncedLyrics> = LazyLock::new(|| {
-    SyncedLyrics::new(vec![
+    SyncedLyrics::try_new(vec![
         LineTag::new(Duration::from_secs(1), String::new()),
         LineTag::new(Duration::from_secs_f32(5.4), String::new()),
         LineTag::new(Duration::from_secs_f32(8.1), String::new()),
     ])
+    .unwrap()
 });
+
+#[test]
+fn lyrics_active_tag_index() {
+    let lyrics = &ACTIVE_TAG_LYRICS;
+    assert_eq!(lyrics.active_tag_index(Duration::from_secs(0)), None);
+    assert_eq!(lyrics.active_tag_index(Duration::from_secs_f32(0.5)), None);
+    assert_eq!(lyrics.active_tag_index(Duration::from_secs(1)), Some(0));
+    assert_eq!(lyrics.active_tag_index(Duration::from_secs(4)), Some(0));
+    assert_eq!(
+        lyrics.active_tag_index(Duration::from_secs_f32(5.4)),
+        Some(1)
+    );
+    assert_eq!(
+        lyrics.active_tag_index(Duration::from_secs_f32(7.8)),
+        Some(1)
+    );
+    assert_eq!(
+        lyrics.active_tag_index(Duration::from_secs_f32(8.1)),
+        Some(2)
+    );
+    assert_eq!(
+        lyrics.active_tag_index(Duration::from_secs(u64::MAX)),
+        Some(2)
+    );
+}
 
 #[test]
 fn lyrics_active_tag() {
     let lyrics = &ACTIVE_TAG_LYRICS;
     assert_eq!(lyrics.active_tag(Duration::from_secs(0)), None);
     assert_eq!(lyrics.active_tag(Duration::from_secs_f32(0.5)), None);
-    assert_eq!(lyrics.active_tag(Duration::from_secs(1)), Some(0));
-    assert_eq!(lyrics.active_tag(Duration::from_secs(4)), Some(0));
-    assert_eq!(lyrics.active_tag(Duration::from_secs_f32(5.4)), Some(1));
-    assert_eq!(lyrics.active_tag(Duration::from_secs_f32(7.8)), Some(1));
-    assert_eq!(lyrics.active_tag(Duration::from_secs_f32(8.1)), Some(2));
-    assert_eq!(lyrics.active_tag(Duration::from_secs(u64::MAX)), Some(2));
-}
-
-#[test]
-fn lyrics_current_line() {
-    let lyrics = &ACTIVE_TAG_LYRICS;
-    assert_eq!(lyrics.current_line(Duration::from_secs(0)), None);
-    assert_eq!(lyrics.current_line(Duration::from_secs_f32(0.5)), None);
     assert_eq!(
-        lyrics.current_line(Duration::from_secs(1)),
+        lyrics.active_tag(Duration::from_secs(1)),
         Some(&lyrics.lines[0])
     );
     assert_eq!(
-        lyrics.current_line(Duration::from_secs(4)),
+        lyrics.active_tag(Duration::from_secs(4)),
         Some(&lyrics.lines[0])
     );
     assert_eq!(
-        lyrics.current_line(Duration::from_secs_f32(5.4)),
+        lyrics.active_tag(Duration::from_secs_f32(5.4)),
         Some(&lyrics.lines[1])
     );
     assert_eq!(
-        lyrics.current_line(Duration::from_secs_f32(7.8)),
+        lyrics.active_tag(Duration::from_secs_f32(7.8)),
         Some(&lyrics.lines[1])
     );
     assert_eq!(
-        lyrics.current_line(Duration::from_secs_f32(8.1)),
+        lyrics.active_tag(Duration::from_secs_f32(8.1)),
         Some(&lyrics.lines[2])
     );
     assert_eq!(
-        lyrics.current_line(Duration::from_secs(u64::MAX)),
+        lyrics.active_tag(Duration::from_secs(u64::MAX)),
         Some(&lyrics.lines[2])
     );
 }

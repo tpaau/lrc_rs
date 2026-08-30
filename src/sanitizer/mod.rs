@@ -1,13 +1,16 @@
 #[cfg(test)]
 mod tests;
 
-// TODO: This function currently simply takes unchecked parsed lyrics and unsyncs them. What it
-// should do instead is take the input and remove as many tag-looking things from it as possible.
-// And it should never return an error.
 /// Strips tags from lyrics.
 ///
-/// It is primarily useful for removing malformed tags from lyrics that couldn't be parsed if you
-/// want to avoid showing users the malformed data.
+/// This function is primarily useful for removing malformed tags from lyrics that couldn't be
+/// parsed if you want to avoid showing users the malformed data.
+///
+/// It's capable of removing those kinds of malformed data from lyrics:
+/// - Unknown ID tags
+/// - Valid but incorrectly ordered timed tags
+///
+/// It will fail to handle data that contains syntax errors.
 #[cfg_attr(
     feature = "parser",
     doc = r#"
@@ -46,7 +49,7 @@ assert_eq!(
     }))
 );
 
-// But we can still strip the malformed tags so the lyrics look decent:
+// But we can still strip the malformed tags so that the lyrics look decent:
 let expected = String::from("Line 1\n\
 Line 2\n\
 Line 3");

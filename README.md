@@ -8,12 +8,15 @@ Docs can be found [here](https://tpaau.github.io/lrc_rs/lrc_rs/).
 ## Features
 - Reliable parser built with the [`nom`](https://crates.io/crates/nom) crate
 - Coverage of all the ID tags and comment tags
-- Support for tags from the A2 extension
+- Support for tags from the A2 extension (karaoke-style word highlighting)
 - Easy serialization
 - Simple conversion of synced lyrics to unsynced lyrics
 - Straightforward access to lyrics data with timestamps
 
 ## Examples
+[Chilen](https://github.com/tpaau/chilen) uses the `lrc_rs` crate for parsing and displaying lyrics
+![Lyrics synchronization showcase](https://github.com/tpaau/lrc_rs/blob/main/sync-showcase.mp4)
+
 Parse some LRC content
 ```rust
 # #[cfg(feature = "parser")] {
@@ -73,11 +76,11 @@ Create synced lyrics
 ```rust
 # use std::time::Duration;
 # use lrc_rs::{SyncedLyrics, LineTag, SegmentTag};
-let mut lyrics = SyncedLyrics::default();
-
-// Add some metadata
-lyrics.title(Some("My awesome song".to_string()));
-lyrics.file_author(Some("me!!".to_string()));
+let mut lyrics = SyncedLyrics {
+    title: Some("My awesome song".to_string()),
+    file_author: Some("me!!".to_string()),
+    ..Default::default()
+};
 
 // This method checks if the timestamp order is correct, so prefer using it over manually adding tags
 lyrics.line(
@@ -85,7 +88,8 @@ lyrics.line(
         Duration::from_secs_f32(5.3),
         "La la la".to_string()
     )
-).unwrap();
+)
+.unwrap();
 
 // And here's an example on when it can fail
 assert_eq!(
@@ -108,27 +112,29 @@ Access lyrics data at a specific timestamp
 // Needed for `active_tag`
 use lrc_rs::LyricsAccess;
 
-let lyrics = SyncedLyrics::new(vec![
+let lyrics = SyncedLyrics::try_new(vec![
     LineTag::new(Duration::from_secs(1), "First line".to_string()),
     LineTag::new(Duration::from_secs_f32(3.1), "Second line".to_string()),
     LineTag::new(Duration::from_secs_f32(5.3), "Third line".to_string()),
-]);
+])
+.unwrap();
 
-// For `SyncedLyrics`, the `active_tag` returns an index to the active line
+// For `SyncedLyrics`, the `active_tag` returns the active line
 assert_eq!(lyrics.active_tag(Duration::default()), None);
-assert_eq!(lyrics.active_tag(Duration::from_secs(1)), Some(0));
-assert_eq!(lyrics.active_tag(Duration::from_secs(4)), Some(1));
-assert_eq!(lyrics.active_tag(Duration::from_secs(u64::MAX)), Some(2));
+assert_eq!(lyrics.active_tag(Duration::from_secs(1)), lyrics.lines.get(0));
+assert_eq!(lyrics.active_tag(Duration::from_secs(4)), lyrics.lines.get(1));
+assert_eq!(lyrics.active_tag(Duration::from_secs(u64::MAX)), lyrics.lines.get(2));
 
-let lyrics = SyncedLyrics::new(vec![
+let lyrics = SyncedLyrics::try_new(vec![
     LineTag::new(Duration::from_secs_f32(1.2), "Hello".to_string()),
     // Lines don't have to contain any segments, in which case there is no active lyrics data until
     // the next line
     LineTag { timestamp: Duration::from_secs(2), segments: Vec::new() },
     LineTag::new(Duration::from_secs_f32(4.1), "World!".to_string()),
-]);
+])
+.unwrap();
 
-let index = lyrics.active_tag(Duration::from_secs(3)).unwrap();
+let index = lyrics.active_tag_index(Duration::from_secs(3)).unwrap();
 assert_eq!(lyrics.lines[index].active_tag(Duration::from_secs(3)), None);
 
 let line = LineTag {
@@ -143,18 +149,18 @@ let line = LineTag {
 /// For `LineTag`, the `active_tag` returns an index to a segment in the line
 assert_eq!(line.active_tag(Duration::default()), None);
 assert_eq!(line.active_tag(Duration::from_secs_f32(0.5)), None);
-assert_eq!(line.active_tag(Duration::from_secs(1)), Some(0));
-assert_eq!(line.active_tag(Duration::from_secs(2)), Some(1));
-assert_eq!(line.active_tag(Duration::from_secs(3)), Some(1));
-assert_eq!(line.active_tag(Duration::from_secs(4)), Some(2));
-assert_eq!(line.active_tag(Duration::from_secs(u64::MAX)), Some(2));
+assert_eq!(line.active_tag(Duration::from_secs(1)), line.segments.get(0));
+assert_eq!(line.active_tag(Duration::from_secs(2)), line.segments.get(1));
+assert_eq!(line.active_tag(Duration::from_secs(3)), line.segments.get(1));
+assert_eq!(line.active_tag(Duration::from_secs(4)), line.segments.get(2));
+assert_eq!(line.active_tag(Duration::from_secs(u64::MAX)), line.segments.get(2));
 
 assert_eq!(
-    line.segments[line.active_tag(Duration::from_secs_f32(1.1)).unwrap()].content,
+    line.segments[line.active_tag_index(Duration::from_secs_f32(1.1)).unwrap()].content,
     "First".to_string()
 );
 assert_eq!(
-    line.segments[line.active_tag(Duration::from_secs_f32(2.3)).unwrap()].content,
+    line.segments[line.active_tag_index(Duration::from_secs_f32(2.3)).unwrap()].content,
     "Second".to_string()
 );
 ```

@@ -63,6 +63,7 @@ fn duration_to_a2_timestamp(dur: Duration) -> String {
     format!("<{}>", duration_to_timestamp(dur))
 }
 
+/// Error code indicating a syntax error.
 #[cfg(feature = "parser")]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -192,21 +193,40 @@ impl From<nom::error::ErrorKind> for ErrorKind {
     }
 }
 
+/// A constraint that specifies the minimum allowed timestamp.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum TimestampConstraint {
+    /// The timestamp has to be greater than this value.
     GreaterThan(Duration),
+    /// The timestamp has to be greater than or equal to this value.
     GreaterThanOrEqual(Duration),
 }
 
+/// An error raised when a timestamp does not satisfy a [constraint](TimestampConstraint).
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct TimestampError {
+    /// The line index at which the invalid timestamp was encountered.
+    ///
+    /// Line numbers are counted from 0.
+    ///
+    /// This value can only be [`None`] when working with isolated [`LineTag`] values.
     pub line: Option<usize>,
+    /// The segment index at which the invalid timestamp was encountered.
+    ///
+    /// Segment numbers are counted from 0.
+    ///
+    /// This value can only be [`Some`] if the A2 format (enhanced LRC) is used, where lines can
+    /// consist of more than one segment.
     pub segment: Option<usize>,
+    /// Specifies the minimum expected timestamp.
     pub expected: TimestampConstraint,
+    /// The encountered timestamp value.
     pub actual: Duration,
 }
+
+impl std::error::Error for TimestampError {}
 
 impl std::fmt::Display for TimestampError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -310,8 +330,16 @@ impl std::fmt::Display for Error {
 }
 
 /// Accessor trait for synced lyrics.
-pub trait LyricsAccess: Sized {
+pub trait LyricsAccess<T>: Sized {
     /// Returns unsynced lyrics without timestamps or additional metadata.
+    #[cfg_attr(
+        feature = "sanitizer",
+        doc = r#"
+
+If you want to remove LRC data from lyrics without having to parse them first, consider using the
+[`strip_tags`] function.
+"#
+    )]
     ///
     /// # Examples
     /// ```rust
@@ -319,11 +347,12 @@ pub trait LyricsAccess: Sized {
     /// # use lrc_rs::{SyncedLyrics, LineTag};
     /// use lrc_rs::LyricsAccess;
     ///
-    /// let lyrics = SyncedLyrics::new(vec![
+    /// let lyrics = SyncedLyrics::try_new(vec![
     ///     LineTag::new(Duration::default(), "First line".to_string()),
     ///     LineTag::new(Duration::from_secs_f32(1.1), "Second line".to_string()),
     ///     LineTag::new(Duration::from_secs_f32(2.7), "Third line".to_string()),
-    /// ]);
+    /// ])
+    /// .unwrap();
     /// let expected = "First line
     /// Second line
     /// Third line";
@@ -344,27 +373,54 @@ pub trait LyricsAccess: Sized {
     /// # use lrc_rs::{SyncedLyrics, LineTag, SegmentTag};
     /// use lrc_rs::LyricsAccess;
     ///
-    /// let lyrics = SyncedLyrics::new(vec![
+    /// let lyrics = SyncedLyrics::try_new(vec![
     ///     LineTag::new(Duration::from_secs(1), String::new()),
     ///     LineTag::new(Duration::from_secs(2), String::new()),
     ///     LineTag::new(Duration::from_secs(3), String::new()),
-    /// ]);
+    /// ])
+    /// .unwrap();
+    ///
+    /// assert_eq!(lyrics.active_tag_index(Duration::default()), None);
+    /// assert_eq!(lyrics.active_tag_index(Duration::from_secs_f32(0.5)), None);
+    /// assert_eq!(lyrics.active_tag_index(Duration::from_secs(1)), Some(0));
+    /// assert_eq!(lyrics.active_tag_index(Duration::from_secs(2)), Some(1));
+    /// assert_eq!(lyrics.active_tag_index(Duration::from_secs(u64::MAX)), Some(2));
+    /// ```
+    fn active_tag_index(&self, timestamp: Duration) -> Option<usize>;
+
+    /// Returns the active tag or [`None`] if no tag is active for the given `timestamp`.
+    ///
+    /// **WARNING**: this method may return wrong results if the segment timestamp order is not
+    /// correct.
+    ///
+    /// # Examples
+    /// ```rust
+    /// # use std::time::Duration;
+    /// # use lrc_rs::{SyncedLyrics, LineTag, SegmentTag};
+    /// use lrc_rs::LyricsAccess;
+    ///
+    /// let lyrics = SyncedLyrics::try_new(vec![
+    ///     LineTag::new(Duration::from_secs(1), String::new()),
+    ///     LineTag::new(Duration::from_secs(2), String::new()),
+    ///     LineTag::new(Duration::from_secs(3), String::new()),
+    /// ])
+    /// .unwrap();
     ///
     /// assert_eq!(lyrics.active_tag(Duration::default()), None);
     /// assert_eq!(lyrics.active_tag(Duration::from_secs_f32(0.5)), None);
-    /// assert_eq!(lyrics.active_tag(Duration::from_secs(1)), Some(0));
-    /// assert_eq!(lyrics.active_tag(Duration::from_secs(2)), Some(1));
-    /// assert_eq!(lyrics.active_tag(Duration::from_secs(u64::MAX)), Some(2));
+    /// assert_eq!(lyrics.active_tag(Duration::from_secs(1)), lyrics.lines.get(0));
+    /// assert_eq!(lyrics.active_tag(Duration::from_secs(2)), lyrics.lines.get(1));
+    /// assert_eq!(lyrics.active_tag(Duration::from_secs(u64::MAX)), lyrics.lines.get(2));
     /// ```
-    fn active_tag(&self, timestamp: Duration) -> Option<usize>;
+    fn active_tag(&self, timestamp: Duration) -> Option<&T>;
 
     /// Returns whether the element is active for the given timestamp.
     ///
     /// **WARNING**: this method may return wrong results if the segment timestamp order is not
     /// correct.
     ///
-    /// The general idea is: if the timestamp is greater or equal to the earliest timestamp of the
-    /// element, then the element is active.
+    /// An element is considered active when `timestamp` is greater than or equal to its earliest
+    /// timestamp.
     fn is_active(&self, timestamp: Duration) -> bool;
 
     /// Checks if timed tag timestamps are ordered correctly.
@@ -397,6 +453,13 @@ pub trait LyricsAccess: Sized {
     /// );
     /// ```
     fn check_timestamp_order(&self) -> Result<(), TimestampError>;
+
+    /// Returns whether  the element contains tags indicating that it uses the enhanced LRC format.
+    ///
+    /// Enhanced LRC is indicated by either:
+    /// - a [`LineTag`] containing multiple segments; or
+    /// - a [`SegmentTag`] whose timestamp is later than its line's timestamp.
+    fn is_enhanced_lrc(&self) -> bool;
 }
 
 /// Segment of lyrics in a [single line](LineTag), associated with a timestamp.
@@ -434,7 +497,7 @@ impl SegmentTag {
 
     /// Returns whether the segment is active at the given timestamp.
     ///
-    /// A segment is considered active if the given timestamp is greater to or equal to the segment
+    /// A segment is considered active if `timestamp` is greater to or equal to the segment
     /// timestamp.
     ///
     /// # Examples
@@ -480,13 +543,13 @@ impl<'a> From<parser::TimestampedTag<'a>> for LineTag {
     }
 }
 
-impl LyricsAccess for LineTag {
+impl LyricsAccess<SegmentTag> for LineTag {
     fn to_unsynced(self) -> String {
         let segments: Vec<_> = self.segments.into_iter().map(|s| s.content).collect();
         segments.join("")
     }
 
-    fn active_tag(&self, timestamp: Duration) -> Option<usize> {
+    fn active_tag_index(&self, timestamp: Duration) -> Option<usize> {
         if self.segments.is_empty() || timestamp < self.timestamp {
             None
         } else {
@@ -499,12 +562,16 @@ impl LyricsAccess for LineTag {
         }
     }
 
+    fn active_tag(&self, timestamp: Duration) -> Option<&SegmentTag> {
+        self.active_tag_index(timestamp)
+            .and_then(|i| self.segments.get(i))
+    }
+
     /// Returns whether the line is active for the given timestamp.
     ///
-    /// A line is considered active if the given timestamp is greater than or equal to the line
-    /// timestamp. The line timestamp is considered to be the earliest, so if any of the segments
-    /// have a timestamp that is earlier than the line timestamp, this method will return wrong
-    /// results.
+    /// A line is considered active if `timestamp` is greater than or equal to the line timestamp.
+    /// The line timestamp is considered to be the earliest, so if any of the segments have a
+    /// timestamp that is earlier than the line timestamp, this method will return wrong results.
     ///
     /// # Examples
     /// ```
@@ -532,7 +599,7 @@ impl LyricsAccess for LineTag {
 
     // NOTE: If a line has only one segment, its timestamp doesn't have to be the same as the
     // timestamp of the line. The window between the line timestamp and the timestamp of the first
-    // tag is when no segment is active. It does indicate that the A2 extension is active, though.
+    // tag is when no segment is active. This indicates that the A2 extension is active.
     fn check_timestamp_order(&self) -> Result<(), TimestampError> {
         if let Some(segment) = self.segments.first() {
             if segment.timestamp < self.timestamp {
@@ -560,6 +627,16 @@ impl LyricsAccess for LineTag {
             Ok(())
         } else {
             Ok(())
+        }
+    }
+
+    fn is_enhanced_lrc(&self) -> bool {
+        if self.segments.len() > 1 {
+            true
+        } else if let Some(segment) = self.segments.first() {
+            self.timestamp < segment.timestamp
+        } else {
+            false
         }
     }
 }
@@ -607,19 +684,6 @@ impl LineTag {
         }
     }
 
-    pub fn current_segment(&self, timestamp: Duration) -> Option<&SegmentTag> {
-        if self.segments.is_empty() || timestamp < self.timestamp {
-            None
-        } else {
-            for segment in self.segments.iter().rev() {
-                if segment.is_active(timestamp) {
-                    return Some(segment);
-                }
-            }
-            None
-        }
-    }
-
     /// Create a new line tag with a single segment with the same timestamp.
     ///
     /// # Examples
@@ -645,13 +709,20 @@ impl LineTag {
         }
     }
 
-    /// Set the timestamp of the line.
-    pub fn timestamp(&mut self, timestamp: Duration) -> &mut Self {
+    /// Sets the timestamp of the line.
+    ///
+    /// Returns [`None`] if the `timestamp` is later than the first segment of the line.
+    pub fn timestamp(&mut self, timestamp: Duration) -> Option<&mut Self> {
+        if let Some(segment) = self.segments.first()
+            && timestamp > segment.timestamp
+        {
+            return None;
+        }
         self.timestamp = timestamp;
-        self
+        Some(self)
     }
 
-    /// Add a segment to the line.
+    /// Adds a segment to the line.
     ///
     /// Prefer using this method over manually adding segments to lines as it ensures that the
     /// timestamp order stays correct. If you need to add segments manually, use the
@@ -660,7 +731,7 @@ impl LineTag {
         self.segments(&[segment])
     }
 
-    /// Add multiple segments to the line.
+    /// Adds multiple segments to the line.
     ///
     /// Prefer using this method over manually adding segments to lines as it ensures that the
     /// timestamp order stays correct. If you need to add segments manually, use the
@@ -722,20 +793,6 @@ pub struct LRCTool {
     pub version: Option<String>,
 }
 
-impl LRCTool {
-    /// Set the name of the program.
-    pub fn name(&mut self, name: String) -> &mut Self {
-        self.name = name;
-        self
-    }
-
-    /// Set the version of the program.
-    pub fn version(&mut self, version: Option<String>) -> &mut Self {
-        self.version = version;
-        self
-    }
-}
-
 /// Lyrics grouped into timestamped segments with additional metadata.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
@@ -762,13 +819,13 @@ pub struct SyncedLyrics {
     pub lines: Vec<LineTag>,
 }
 
-impl LyricsAccess for SyncedLyrics {
+impl LyricsAccess<LineTag> for SyncedLyrics {
     fn to_unsynced(self) -> String {
         let lines: Vec<_> = self.lines.into_iter().map(|l| l.to_unsynced()).collect();
         lines.join("\n")
     }
 
-    fn active_tag(&self, timestamp: Duration) -> Option<usize> {
+    fn active_tag_index(&self, timestamp: Duration) -> Option<usize> {
         if self.lines.is_empty() {
             None
         } else {
@@ -781,17 +838,22 @@ impl LyricsAccess for SyncedLyrics {
         }
     }
 
-    /// Returns whether the line is active for the given timestamp.
+    fn active_tag(&self, timestamp: Duration) -> Option<&LineTag> {
+        self.active_tag_index(timestamp)
+            .and_then(|i| self.lines.get(i))
+    }
+
+    /// Returns whether the lyrics are active for the given `timestamp`.
     ///
-    /// Lyrics are considered active if the given timestamp is greater than or equal to the
-    /// timestamp of the first line of the lyrics. The first line is assumed to have the earliest
-    /// timestamp, so if the line order is not correct this method may return wrong results.
+    /// Lyrics are considered active if `timestamp` is greater than or equal to the timestamp of the
+    /// first line of the lyrics. The first line is assumed to have the earliest timestamp, so if
+    /// the line order is not correct this method may return wrong results.
     ///
     /// # Examples
     /// ```
     /// # use std::time::Duration;
     /// # use lrc_rs::{LineTag, LyricsAccess, SegmentTag, SyncedLyrics};
-    /// let lyrics = SyncedLyrics::new(vec![
+    /// let lyrics = SyncedLyrics::try_new(vec![
     ///     LineTag {
     ///         // Checking whether lyrics are active is delegated to the first line
     ///         timestamp: Duration::from_secs(11),
@@ -802,10 +864,11 @@ impl LyricsAccess for SyncedLyrics {
     ///     },
     ///     // All other stuff doesn't matter
     ///     LineTag {
-    ///         timestamp: Duration::from_secs(11),
-    ///         segments: vec![SegmentTag::new(Duration::from_secs(12), String::new())]
+    ///         timestamp: Duration::from_secs(17),
+    ///         segments: vec![SegmentTag::new(Duration::from_secs(17), String::new())]
     ///     }
-    /// ]);
+    /// ])
+    /// .unwrap();
     ///
     /// assert!(!lyrics.is_active(Duration::default()));
     /// assert!(!lyrics.is_active(Duration::from_secs(3)));
@@ -847,6 +910,15 @@ impl LyricsAccess for SyncedLyrics {
         } else {
             Ok(())
         }
+    }
+
+    fn is_enhanced_lrc(&self) -> bool {
+        for line in &self.lines {
+            if line.is_enhanced_lrc() {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -892,76 +964,7 @@ impl SyncedLyrics {
         format!("{mins}:{secs}")
     }
 
-    // /// Comments found in the lyrics.
-    // pub comments: Vec<String>,
-    // /// LRC segments grouped by lines.
-    // pub lines: Vec<LineTag>,
-
-    /// Set the title of the song.
-    pub fn title(&mut self, title: Option<String>) -> &mut Self {
-        self.title = title;
-        self
-    }
-
-    /// Set the artist performing the song.
-    pub fn artist(&mut self, artist: Option<String>) -> &mut Self {
-        self.artist = artist;
-        self
-    }
-
-    /// Set the album the song is from.
-    pub fn album(&mut self, album: Option<String>) -> &mut Self {
-        self.album = album;
-        self
-    }
-
-    /// Set the author of the song.
-    pub fn author(&mut self, author: Option<String>) -> &mut Self {
-        self.author = author;
-        self
-    }
-
-    /// Set the lyricist of the song.
-    pub fn lyricist(&mut self, lyricist: Option<String>) -> &mut Self {
-        self.lyricist = lyricist;
-        self
-    }
-
-    /// Set the length of the song.
-    pub fn length(&mut self, length: Option<Duration>) -> &mut Self {
-        self.length = length;
-        self
-    }
-
-    /// Set the author of the LRC file (not the song).
-    pub fn file_author(&mut self, file_author: Option<String>) -> &mut Self {
-        self.file_author = file_author;
-        self
-    }
-
-    /// Set the info on the player or editor that created the LRC file.
-    pub fn tool(&mut self, tool: Option<LRCTool>) -> &mut Self {
-        self.tool = tool;
-        self
-    }
-
-    /// Add a comment to the lyrics.
-    ///
-    /// **NOTE**: In serialized content, comments will be put between ID tags and timed tags.
-    pub fn comment(&mut self, comment: String) -> &mut Self {
-        self.comments.push(comment);
-        self
-    }
-
-    /// Add multiple comments to the lyrics.
-    ///
-    /// **NOTE**: In serialized content, comments will be put between ID tags and timed tags.
-    pub fn comments(&mut self, comments: &[String]) -> &mut Self {
-        self.comments.extend_from_slice(comments);
-        self
-    }
-
-    /// Add a line to the lyrics.
+    /// Adds a line to the lyrics.
     ///
     /// Prefer using this method over manually adding lines to lyrics as it ensures that the
     /// timestamp order stays correct. If you need to add lines manually, use the
@@ -970,7 +973,7 @@ impl SyncedLyrics {
         self.lines(&[line])
     }
 
-    /// Add multiple lines to the lyrics.
+    /// Adds multiple lines to the lyrics.
     ///
     /// Prefer using this method over manually adding lines to lyrics as it ensures that the
     /// timestamp order stays correct. If you need to add lines manually, use the
@@ -1014,9 +1017,11 @@ impl SyncedLyrics {
         }
     }
 
-    /// Create an empty synced lyrics struct with some timed tags.
-    pub fn new(tags: Vec<LineTag>) -> Self {
-        Self {
+    /// Creates an empty synced lyrics struct with some timed tags.
+    ///
+    /// Returns an error if the timestamp order is not correct.
+    pub fn try_new(tags: Vec<LineTag>) -> Result<Self, TimestampError> {
+        let lyrics = Self {
             title: None,
             artist: None,
             album: None,
@@ -1027,36 +1032,9 @@ impl SyncedLyrics {
             tool: None,
             comments: Vec::new(),
             lines: tags,
-        }
-    }
-
-    /// Checks if the lyrics contain any tags from the A2 extension.
-    ///
-    /// If the enhanced LRC format is used, [line tags](LineTag) may contain more than one segment,
-    /// and the first [segment](SegmentTag) in [line tags](LineTag) may have a timestamp that is
-    /// later than the line timestamp.
-    pub fn is_enhanced_lrc(&self) -> bool {
-        for line in &self.lines {
-            if line.segments.is_empty() {
-                continue;
-            } else if line.segments.len() > 1 || line.timestamp < line.segments[0].timestamp {
-                return true;
-            }
-        }
-        false
-    }
-
-    pub fn current_line(&self, timestamp: Duration) -> Option<&LineTag> {
-        if self.lines.is_empty() {
-            None
-        } else {
-            for line in self.lines.iter().rev() {
-                if line.is_active(timestamp) {
-                    return Some(line);
-                }
-            }
-            None
-        }
+        };
+        lyrics.check_timestamp_order()?;
+        Ok(lyrics)
     }
 
     /// Serialize the struct to LRC format.
