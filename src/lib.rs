@@ -1,5 +1,5 @@
 #![doc = include_str!("../README.md")]
-#![feature(doc_cfg)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #[cfg(any(feature = "parser", feature = "sanitizer"))]
 pub(crate) mod parser;
 #[cfg(feature = "sanitizer")]
