@@ -1,8 +1,8 @@
 doc:
-	cargo doc --no-deps -p lrc_rs --all-features
+	RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features --no-deps -p lrc_rs
 
 open-doc:
-	cargo doc --no-deps -p lrc_rs --all-features --open
+	RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features --no-deps -p lrc_rs --open
 
 test:
 	cargo test --all-features

@@ -23,3 +23,7 @@ parser = [ "dep:nom" ]
 sanitizer = [ "dep:nom" ]
 log = [ "dep:log" ]
 serde = [ "dep:serde" ]
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+all-features = true
